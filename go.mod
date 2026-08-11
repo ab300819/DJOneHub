@@ -1,4 +1,4 @@
-module github.com/iniwex5/vohive
+module github.com/ab300819/DJOneHub
 
 go 1.26.3
 

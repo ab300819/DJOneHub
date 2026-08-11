@@ -75,4 +75,4 @@ go test -mod=mod ./...
 
 ## 注意
 
-当前 Go module 路径仍为 `github.com/iniwex5/vohive`，这是为了保持现有共享包导入路径及上游来源关系不变。确定最终 GitHub 仓库地址后，可以再进行一次独立的模块路径迁移，但这不是构建和发布 DJOneHub 的前置条件。
+Go module 路径为 `github.com/ab300819/DJOneHub`，与仓库地址一致。此前沿用上游的 `github.com/iniwex5/vohive` 会导致 `go get` 无法安装、导入路径与仓库不符，已一次性迁移完成。上游来源与署名关系记录在 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)，不依赖 module 路径表达。

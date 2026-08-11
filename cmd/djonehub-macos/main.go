@@ -25,12 +25,12 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/ab300819/DJOneHub/internal/backend"
+	"github.com/ab300819/DJOneHub/internal/config"
+	"github.com/ab300819/DJOneHub/internal/esim"
+	"github.com/ab300819/DJOneHub/internal/modem"
+	"github.com/ab300819/DJOneHub/pkg/smscodec"
 	"github.com/damonto/euicc-go/driver"
-	"github.com/iniwex5/vohive/internal/backend"
-	"github.com/iniwex5/vohive/internal/config"
-	"github.com/iniwex5/vohive/internal/esim"
-	"github.com/iniwex5/vohive/internal/modem"
-	"github.com/iniwex5/vohive/pkg/smscodec"
 )
 
 //go:embed web/*

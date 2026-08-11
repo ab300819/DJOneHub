@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/iniwex5/vohive/pkg/mbim"
+	"github.com/ab300819/DJOneHub/pkg/mbim"
 )
 
 func TestMBIMBackendUSSDProviderConformance(t *testing.T) {

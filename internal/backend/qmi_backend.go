@@ -9,11 +9,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ab300819/DJOneHub/internal/modem"
+	"github.com/ab300819/DJOneHub/pkg/logger"
+	"github.com/ab300819/DJOneHub/pkg/smscodec"
 	"github.com/iniwex5/quectel-qmi-go/pkg/manager"
 	"github.com/iniwex5/quectel-qmi-go/pkg/qmi"
-	"github.com/iniwex5/vohive/internal/modem"
-	"github.com/iniwex5/vohive/pkg/logger"
-	"github.com/iniwex5/vohive/pkg/smscodec"
 	"github.com/warthog618/sms/encoding/tpdu"
 )
 

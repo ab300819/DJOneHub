@@ -3,11 +3,11 @@ package esim
 import (
 	"fmt"
 
+	"github.com/ab300819/DJOneHub/internal/esim/pki"
+	"github.com/ab300819/DJOneHub/pkg/logger"
 	"github.com/damonto/euicc-go/bertlv"
 	"github.com/damonto/euicc-go/bertlv/primitive"
 	"github.com/damonto/euicc-go/lpa"
-	"github.com/iniwex5/vohive/internal/esim/pki"
-	"github.com/iniwex5/vohive/pkg/logger"
 )
 
 type euiccInfoReader interface {

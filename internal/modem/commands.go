@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/iniwex5/vohive/internal/apduarbiter"
-	"github.com/iniwex5/vohive/internal/simaid"
+	"github.com/ab300819/DJOneHub/internal/apduarbiter"
+	"github.com/ab300819/DJOneHub/internal/simaid"
 )
 
 func (m *Manager) QueryIMEI() (string, error) {

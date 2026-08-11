@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ab300819/DJOneHub/pkg/mbim"
+	"github.com/ab300819/DJOneHub/pkg/smscodec"
 	qmimanager "github.com/iniwex5/quectel-qmi-go/pkg/manager"
-	"github.com/iniwex5/vohive/pkg/mbim"
-	"github.com/iniwex5/vohive/pkg/smscodec"
 	"github.com/warthog618/sms/encoding/tpdu"
 )
 

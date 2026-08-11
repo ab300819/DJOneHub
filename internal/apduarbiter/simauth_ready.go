@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/iniwex5/vohive/pkg/logger"
+	"github.com/ab300819/DJOneHub/pkg/logger"
 )
 
 var ErrSIMAuthNotReady = errors.New("simauth not ready")

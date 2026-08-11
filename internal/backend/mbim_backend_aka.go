@@ -5,7 +5,7 @@ import (
 	"errors"
 	"time"
 
-	"github.com/iniwex5/vohive/pkg/mbim"
+	"github.com/ab300819/DJOneHub/pkg/mbim"
 )
 
 // CalculateAKA computes AKA via the MBIM Auth service.

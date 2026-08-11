@@ -10,9 +10,9 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/ab300819/DJOneHub/pkg/logger"
+	"github.com/ab300819/DJOneHub/pkg/mbim"
 	qmiq "github.com/iniwex5/quectel-qmi-go/pkg/qmi"
-	"github.com/iniwex5/vohive/pkg/logger"
-	"github.com/iniwex5/vohive/pkg/mbim"
 )
 
 var (

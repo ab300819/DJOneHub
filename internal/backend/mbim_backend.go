@@ -6,9 +6,9 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/ab300819/DJOneHub/internal/modem"
+	"github.com/ab300819/DJOneHub/pkg/mbim"
 	"github.com/iniwex5/quectel-qmi-go/pkg/manager"
-	"github.com/iniwex5/vohive/internal/modem"
-	"github.com/iniwex5/vohive/pkg/mbim"
 )
 
 // MBIMBackend implements DeviceBackend over an MBIM modem.

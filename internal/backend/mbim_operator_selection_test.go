@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/iniwex5/vohive/pkg/mbim"
+	"github.com/ab300819/DJOneHub/pkg/mbim"
 )
 
 func TestMBIMBackendImplementsOperatorSelectionProvider(t *testing.T) {

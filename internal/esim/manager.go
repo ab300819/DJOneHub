@@ -17,14 +17,14 @@ import (
 
 	"golang.org/x/sync/singleflight"
 
+	"github.com/ab300819/DJOneHub/internal/apduarbiter"
+	backendpkg "github.com/ab300819/DJOneHub/internal/backend"
+	"github.com/ab300819/DJOneHub/internal/modem"
+	"github.com/ab300819/DJOneHub/pkg/logger"
 	"github.com/damonto/euicc-go/bertlv"
 	"github.com/damonto/euicc-go/driver"
 	"github.com/damonto/euicc-go/lpa"
 	sgp22 "github.com/damonto/euicc-go/v2"
-	"github.com/iniwex5/vohive/internal/apduarbiter"
-	backendpkg "github.com/iniwex5/vohive/internal/backend"
-	"github.com/iniwex5/vohive/internal/modem"
-	"github.com/iniwex5/vohive/pkg/logger"
 )
 
 // 支持的 ISD-R AID 列表
