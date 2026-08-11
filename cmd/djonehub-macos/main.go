@@ -29,6 +29,7 @@ import (
 	"github.com/ab300819/DJOneHub/internal/config"
 	"github.com/ab300819/DJOneHub/internal/esim"
 	"github.com/ab300819/DJOneHub/internal/modem"
+	"github.com/ab300819/DJOneHub/internal/service"
 	"github.com/ab300819/DJOneHub/pkg/smscodec"
 	"github.com/damonto/euicc-go/driver"
 )
@@ -106,24 +107,11 @@ type app struct {
 	trafficBaselines map[string]networkByteCounters
 }
 
-type usbInterfaceStatus struct {
-	Number    int `json:"number"`
-	Class     int `json:"class"`
-	Subclass  int `json:"subclass"`
-	Protocol  int `json:"protocol"`
-	Endpoints int `json:"endpoints"`
-}
+type usbInterfaceStatus = service.USBInterface
 
-type usbDeviceStatus struct {
-	Product    string               `json:"product"`
-	Vendor     string               `json:"vendor"`
-	VendorID   string               `json:"vendor_id"`
-	ProductID  string               `json:"product_id"`
-	LocationID string               `json:"location_id"`
-	Speed      string               `json:"speed"`
-	Mode       string               `json:"mode"`
-	Interfaces []usbInterfaceStatus `json:"interfaces"`
-}
+// These live in internal/service so every transport shares one definition;
+// the aliases keep the existing call sites in this file unchanged.
+type usbDeviceStatus = service.USBDevice
 
 type networkDiagnostic struct {
 	USBNetMode        string            `json:"usbnet_mode"`
@@ -188,6 +176,7 @@ func main() {
 	flag.StringVar(&listen, "listen", "127.0.0.1:7575", "HTTP listen address")
 	flag.BoolVar(&demo, "demo", false, "run the web UI with simulated modem data")
 	flag.IntVar(&parentPID, "parent-pid", 0, "exit when this parent process goes away; used by the macOS app")
+	flag.BoolVar(&stdioMode, "stdio", false, "serve line-delimited JSON on stdin/stdout instead of HTTP")
 	flag.Parse()
 
 	if demo {
@@ -325,6 +314,10 @@ func (a *app) installESIMManager(manager *esim.Manager, switchAllowed bool) bool
 // force-quit parent never gets to send a signal.
 var parentPID int
 
+// stdioMode is set by -stdio. The native app uses it so the core opens no
+// socket at all: the only channel is the pipe pair it inherits from its parent.
+var stdioMode bool
+
 // watchParent closes the returned channel once the process is reparented, which
 // on Darwin happens as soon as the original parent exits.
 func watchParent(pid int) <-chan struct{} {
@@ -342,6 +335,11 @@ func watchParent(pid int) <-chan struct{} {
 }
 
 func serve(instance *app, listen string) {
+	if stdioMode {
+		serveStdio(instance)
+		return
+	}
+
 	server := &http.Server{
 		Addr:              listen,
 		Handler:           instance.routes(),
@@ -772,74 +770,20 @@ func securityHeaders(next http.Handler) http.Handler {
 }
 
 func (a *app) health(w http.ResponseWriter, _ *http.Request) {
-	usbDevice := a.currentUSBDevice()
-	esimManager, _ := a.currentESIMManager()
-	writeJSON(w, http.StatusOK, map[string]any{
-		"ok": true, "port": a.port, "esim_available": a.demo || esimManager != nil, "demo": a.demo,
-		"usb_device": usbDevice, "discovery_error": a.discoveryError,
-	})
+	writeJSON(w, http.StatusOK, a.Health())
 }
 
 func (a *app) status(w http.ResponseWriter, _ *http.Request) {
-	if a.demo {
-		writeJSON(w, http.StatusOK, modem.DeviceStatus{
-			IMEI:          "867400000000001",
-			Firmware:      "EG25GGBR07A08M2G",
-			ICCID:         "89860123456789012345",
-			IMSI:          "460001234567890",
-			Operator:      "China Mobile",
-			SimInserted:   true,
-			SignalDBM:     -73,
-			SignalRSRP:    -96,
-			SignalRSRQ:    -9,
-			RegStatus:     1,
-			RegStatusText: "已注册",
-			NetworkMode:   "LTE",
-			NetworkDuplex: "FDD",
-			RadioBand:     "B3",
-			USBNetMode:    0,
-		})
+	status, err := a.Status()
+	if err != nil {
+		writeError(w, http.StatusBadGateway, err.Error())
 		return
 	}
-	if a.modem == nil {
-		// A libusb handle may survive a physical unplug. Refresh the macOS USB
-		// inventory before using it so the UI never reports a stale connection.
-		if a.usbAT != nil && a.currentUSBDevice() == nil {
-			a.markUSBATDetached("DJI USB device disconnected")
-		}
-		if err := a.ensureUSBAT(); err != nil {
-			log.Printf("USB AT retry failed: %v", err)
-		}
-		if a.usbAT != nil {
-			status, err := a.usbATStatus()
-			if err == nil {
-				writeJSON(w, http.StatusOK, status)
-				return
-			}
-			a.resetUSBATIfGone(err)
-			log.Printf("USB AT status failed: %v", err)
-		}
-		usbDevice := a.currentUSBDevice()
-		summary := "未发现 AT 串口"
-		operator := "未连接"
-		network := "不可用"
-		if usbDevice != nil {
-			summary = fmt.Sprintf("%s %s (%s:%s)", usbDevice.Vendor, usbDevice.Product, usbDevice.VendorID, usbDevice.ProductID)
-			operator = "已检测到 USB 设备"
-			network = usbDevice.Mode
-		}
-		writeJSON(w, http.StatusOK, map[string]any{
-			"operator":        operator,
-			"signal_dbm":      nil,
-			"network_mode":    network,
-			"sim_inserted":    false,
-			"hardware_status": summary,
-			"discovery_error": a.discoveryError,
-			"usb_device":      usbDevice,
-		})
+	if status.Device != nil {
+		writeJSON(w, http.StatusOK, status.Device)
 		return
 	}
-	writeJSON(w, http.StatusOK, a.modem.GetFullStatus())
+	writeJSON(w, http.StatusOK, status.Degraded)
 }
 
 func (a *app) currentUSBDevice() *usbDeviceStatus {
@@ -1377,21 +1321,15 @@ func (a *app) executeAT(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &body) {
 		return
 	}
-	if !strings.HasPrefix(strings.ToUpper(strings.TrimSpace(body.Command)), "AT") {
-		writeError(w, http.StatusBadRequest, "command must start with AT")
-		return
-	}
-	if a.demo {
-		response, _ := a.runATCommand(body.Command, 20*time.Second)
-		writeJSON(w, http.StatusOK, map[string]string{"response": response})
-		return
-	}
-	response, err := a.runATCommand(body.Command, 20*time.Second)
-	if err != nil {
+	response, err := a.ExecuteAT(body.Command)
+	switch {
+	case errors.Is(err, service.ErrInvalidCommand):
+		writeError(w, http.StatusBadRequest, err.Error())
+	case err != nil:
 		writeError(w, http.StatusBadGateway, err.Error())
-		return
+	default:
+		writeJSON(w, http.StatusOK, map[string]string{"response": response})
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"response": response})
 }
 
 func (a *app) networkDiagnostic(w http.ResponseWriter, _ *http.Request) {
