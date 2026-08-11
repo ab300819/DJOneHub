@@ -85,6 +85,88 @@ type Service interface {
 	ClearModuleSMS() (ClearResult, error)
 	// SendSMS sends a text message and reports how many segments it took.
 	SendSMS(phone, message string) (SendResult, error)
+
+	// NetworkDiagnostic gathers the module and host state behind a data session.
+	NetworkDiagnostic() (NetworkDiagnostic, error)
+	// NetworkTraffic samples the module network interface's byte counters.
+	NetworkTraffic() TrafficSnapshot
+	// Check4GRoute reports whether the host currently routes through the module.
+	Check4GRoute() NetworkCheckResult
+	// CheckProxyRoute reports whether the configured local proxy reaches the internet.
+	CheckProxyRoute() NetworkCheckResult
+	// SetUSBNetMode changes the module's USB composition; it takes effect after a reboot.
+	SetUSBNetMode(mode int) (USBNetResult, error)
+	// RebootModule asks the module to restart.
+	RebootModule() (RebootResult, error)
+}
+
+// NetworkDiagnostic is everything the core can say about data connectivity.
+type NetworkDiagnostic struct {
+	USBNetMode        string            `json:"usbnet_mode"`
+	USBCfg            string            `json:"usbcfg"`
+	PDPContexts       []PDPContext      `json:"pdp_contexts"`
+	ActiveContexts    []int             `json:"active_contexts"`
+	PDPAddresses      []string          `json:"pdp_addresses"`
+	MacInterfaces     []MacNetInterface `json:"mac_interfaces"`
+	DefaultRoute      MacDefaultRoute   `json:"default_route"`
+	USBNetworkPresent bool              `json:"usb_network_present"`
+	USBDevice         *USBDevice        `json:"usb_device,omitempty"`
+	Raw               map[string]string `json:"raw,omitempty"`
+	Errors            map[string]string `json:"errors,omitempty"`
+}
+
+// PDPContext is one packet data protocol context defined on the module.
+type PDPContext struct {
+	ID  int    `json:"id"`
+	PDN string `json:"pdn"`
+	APN string `json:"apn"`
+}
+
+// MacNetInterface is one host network interface.
+type MacNetInterface struct {
+	Name   string `json:"name"`
+	Status string `json:"status"`
+	IPv4   string `json:"ipv4"`
+	Kind   string `json:"kind"`
+}
+
+// MacDefaultRoute is the host's current default route.
+type MacDefaultRoute struct {
+	Interface string `json:"interface"`
+	Gateway   string `json:"gateway"`
+}
+
+// NetworkCheckResult is the verdict of a connectivity probe.
+type NetworkCheckResult struct {
+	OK      bool   `json:"ok"`
+	Summary string `json:"summary"`
+	Detail  string `json:"detail"`
+}
+
+// TrafficSnapshot is one sample of the module interface's counters.
+type TrafficSnapshot struct {
+	Available    bool   `json:"available"`
+	Interface    string `json:"interface,omitempty"`
+	RXBytes      uint64 `json:"rx_bytes"`
+	TXBytes      uint64 `json:"tx_bytes"`
+	SessionRX    uint64 `json:"session_rx_bytes"`
+	SessionTX    uint64 `json:"session_tx_bytes"`
+	SessionTotal uint64 `json:"session_total_bytes"`
+	SampledAtMS  int64  `json:"sampled_at_ms"`
+	Error        string `json:"error,omitempty"`
+}
+
+// USBNetResult reports an accepted USB composition change.
+type USBNetResult struct {
+	Mode        int    `json:"mode"`
+	Response    string `json:"response"`
+	NeedsReboot bool   `json:"needs_reboot"`
+}
+
+// RebootResult reports an accepted module restart.
+type RebootResult struct {
+	Accepted bool   `json:"accepted"`
+	Response string `json:"response"`
 }
 
 // ReceivedSMS is one message read from the module.

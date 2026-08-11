@@ -3,6 +3,8 @@ package main
 import (
 	"fmt"
 	"log"
+	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -174,4 +176,173 @@ func (a *app) SendSMS(phone, message string) (service.SendResult, error) {
 		return service.SendResult{}, err
 	}
 	return service.SendResult{Sent: true, Segments: segments}, nil
+}
+
+func (a *app) NetworkDiagnostic() (result service.NetworkDiagnostic, err error) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			log.Printf("network diagnostic panic: %v", recovered)
+			err = service.Fail(service.KindInternal, "network diagnostic failed: %v", recovered)
+		}
+	}()
+	raw := make(map[string]string)
+	errs := make(map[string]string)
+	diag := service.NetworkDiagnostic{
+		USBDevice:     a.currentUSBDevice(),
+		MacInterfaces: discoverMacNetworkInterfaces(),
+		DefaultRoute:  discoverMacDefaultRoute(),
+		Raw:           raw,
+		Errors:        errs,
+	}
+	diag.USBNetworkPresent = hasLikelyUSBNetworkInterface(diag.MacInterfaces)
+
+	commands := map[string]string{
+		"usbnet":  `AT+QCFG="usbnet"`,
+		"usbcfg":  `AT+QCFG="usbcfg"`,
+		"cgdcont": `AT+CGDCONT?`,
+		"cgact":   `AT+CGACT?`,
+		"cgpaddr": `AT+CGPADDR=1`,
+	}
+	for key, command := range commands {
+		resp, cmdErr := a.runATCommand(command, 8*time.Second)
+		if cmdErr != nil {
+			errs[key] = cmdErr.Error()
+			continue
+		}
+		raw[key] = resp
+	}
+
+	diag.USBNetMode = parseUSBNetMode(raw["usbnet"])
+	diag.USBCfg = parseUSBATPrefixed(raw["usbcfg"], "+QCFG:")
+	diag.PDPContexts = parsePDPContexts(raw["cgdcont"])
+	diag.ActiveContexts = parseActivePDPContexts(raw["cgact"])
+	diag.PDPAddresses = parsePDPAddresses(raw["cgpaddr"])
+	if len(errs) == 0 {
+		diag.Errors = nil
+	}
+	return diag, nil
+}
+
+func (a *app) NetworkTraffic() service.TrafficSnapshot {
+	snapshot := service.TrafficSnapshot{SampledAtMS: time.Now().UnixMilli()}
+
+	interfaces := discoverMacNetworkInterfaces()
+	name := selectUSBTrafficInterface(interfaces, discoverMacDefaultRoute())
+	if name == "" {
+		return snapshot
+	}
+	counters, err := discoverMacInterfaceCounters()
+	if err != nil {
+		snapshot.Interface = name
+		snapshot.Error = err.Error()
+		return snapshot
+	}
+	current, ok := counters[name]
+	if !ok {
+		snapshot.Interface = name
+		snapshot.Error = "未读取到网卡计数"
+		return snapshot
+	}
+
+	a.trafficMu.Lock()
+	if a.trafficBaselines == nil {
+		a.trafficBaselines = make(map[string]networkByteCounters)
+	}
+	baseline, exists := a.trafficBaselines[name]
+	if !exists || current.RX < baseline.RX || current.TX < baseline.TX {
+		baseline = current
+		a.trafficBaselines[name] = baseline
+	}
+	a.trafficMu.Unlock()
+
+	snapshot.Available = true
+	snapshot.Interface = name
+	snapshot.RXBytes = current.RX
+	snapshot.TXBytes = current.TX
+	snapshot.SessionRX, snapshot.SessionTX, snapshot.SessionTotal = sessionTrafficFromCounters(current, baseline)
+	return snapshot
+}
+
+func (a *app) Check4GRoute() service.NetworkCheckResult {
+	route := discoverMacDefaultRoute()
+	interfaces := discoverMacNetworkInterfaces()
+	var active *service.MacNetInterface
+	for i := range interfaces {
+		if interfaces[i].Name == route.Interface {
+			active = &interfaces[i]
+			break
+		}
+	}
+	if route.Interface == "" {
+		return service.NetworkCheckResult{
+			OK:      false,
+			Summary: "未读取到默认出口",
+			Detail:  "macOS 没有返回 default route",
+		}
+	}
+	if active != nil && active.Name != "en0" && active.Kind == "ethernet" && active.Status == "active" {
+		return service.NetworkCheckResult{
+			OK:      true,
+			Summary: "当前正在走 4G 模块",
+			Detail:  fmt.Sprintf("默认出口 %s -> %s，IP %s", route.Interface, route.Gateway, active.IPv4),
+		}
+	}
+	detail := fmt.Sprintf("默认出口 %s -> %s", route.Interface, route.Gateway)
+	if active != nil && active.IPv4 != "" {
+		detail += "，IP " + active.IPv4
+	}
+	return service.NetworkCheckResult{OK: false, Summary: "当前没有优先走 4G 模块", Detail: detail}
+}
+
+func (a *app) CheckProxyRoute() service.NetworkCheckResult {
+	proxyURL, _ := url.Parse("http://127.0.0.1:7890")
+	client := &http.Client{
+		Timeout:   8 * time.Second,
+		Transport: &http.Transport{Proxy: http.ProxyURL(proxyURL)},
+	}
+	req, err := http.NewRequest(http.MethodHead, "https://www.google.com/generate_204", nil)
+	if err != nil {
+		return service.NetworkCheckResult{OK: false, Summary: "代理检测请求创建失败", Detail: err.Error()}
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return service.NetworkCheckResult{
+			OK:      false,
+			Summary: "代理未打通",
+			Detail:  "127.0.0.1:7890 代理访问失败：" + err.Error(),
+		}
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNoContent || (resp.StatusCode >= 200 && resp.StatusCode < 400) {
+		return service.NetworkCheckResult{
+			OK:      true,
+			Summary: "代理已打通",
+			Detail:  fmt.Sprintf("127.0.0.1:7890 -> google generate_204 返回 %s", resp.Status),
+		}
+	}
+	return service.NetworkCheckResult{
+		OK:      false,
+		Summary: "代理响应异常",
+		Detail:  fmt.Sprintf("127.0.0.1:7890 返回 %s", resp.Status),
+	}
+}
+
+func (a *app) SetUSBNetMode(mode int) (service.USBNetResult, error) {
+	if mode < 0 || mode > 3 {
+		return service.USBNetResult{}, service.Fail(service.KindInvalid,
+			"only usbnet mode 0, 1, 2 or 3 is allowed")
+	}
+	response, err := a.runATCommand(fmt.Sprintf(`AT+QCFG="usbnet",%d`, mode), 8*time.Second)
+	if err != nil {
+		return service.USBNetResult{}, err
+	}
+	return service.USBNetResult{Mode: mode, Response: response, NeedsReboot: true}, nil
+}
+
+func (a *app) RebootModule() (service.RebootResult, error) {
+	response, err := a.runATCommand("AT+CFUN=1,1", 3*time.Second)
+	if err != nil {
+		return service.RebootResult{}, err
+	}
+	return service.RebootResult{Accepted: true, Response: response}, nil
 }

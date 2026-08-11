@@ -12,7 +12,6 @@ import (
 	"io/fs"
 	"log"
 	"net/http"
-	"net/url"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -108,60 +107,22 @@ type usbInterfaceStatus = service.USBInterface
 // the aliases keep the existing call sites in this file unchanged.
 type usbDeviceStatus = service.USBDevice
 
-type networkDiagnostic struct {
-	USBNetMode        string            `json:"usbnet_mode"`
-	USBCfg            string            `json:"usbcfg"`
-	PDPContexts       []pdpContext      `json:"pdp_contexts"`
-	ActiveContexts    []int             `json:"active_contexts"`
-	PDPAddresses      []string          `json:"pdp_addresses"`
-	MacInterfaces     []macNetInterface `json:"mac_interfaces"`
-	DefaultRoute      macDefaultRoute   `json:"default_route"`
-	USBNetworkPresent bool              `json:"usb_network_present"`
-	USBDevice         *usbDeviceStatus  `json:"usb_device,omitempty"`
-	Raw               map[string]string `json:"raw,omitempty"`
-	Errors            map[string]string `json:"errors,omitempty"`
-}
+type networkDiagnostic = service.NetworkDiagnostic
 
-type pdpContext struct {
-	ID  int    `json:"id"`
-	PDN string `json:"pdn"`
-	APN string `json:"apn"`
-}
+type pdpContext = service.PDPContext
 
-type macNetInterface struct {
-	Name   string `json:"name"`
-	Status string `json:"status"`
-	IPv4   string `json:"ipv4"`
-	Kind   string `json:"kind"`
-}
+type macNetInterface = service.MacNetInterface
 
-type macDefaultRoute struct {
-	Interface string `json:"interface"`
-	Gateway   string `json:"gateway"`
-}
+type macDefaultRoute = service.MacDefaultRoute
 
 type networkByteCounters struct {
 	RX uint64
 	TX uint64
 }
 
-type networkTrafficSnapshot struct {
-	Available    bool   `json:"available"`
-	Interface    string `json:"interface,omitempty"`
-	RXBytes      uint64 `json:"rx_bytes"`
-	TXBytes      uint64 `json:"tx_bytes"`
-	SessionRX    uint64 `json:"session_rx_bytes"`
-	SessionTX    uint64 `json:"session_tx_bytes"`
-	SessionTotal uint64 `json:"session_total_bytes"`
-	SampledAtMS  int64  `json:"sampled_at_ms"`
-	Error        string `json:"error,omitempty"`
-}
+type networkTrafficSnapshot = service.TrafficSnapshot
 
-type networkCheckResult struct {
-	OK      bool   `json:"ok"`
-	Summary string `json:"summary"`
-	Detail  string `json:"detail"`
-}
+type networkCheckResult = service.NetworkCheckResult
 
 func main() {
 	var port string
@@ -1287,93 +1248,16 @@ func (a *app) executeAT(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *app) networkDiagnostic(w http.ResponseWriter, _ *http.Request) {
-	defer func() {
-		if recovered := recover(); recovered != nil {
-			log.Printf("network diagnostic panic: %v", recovered)
-			writeError(w, http.StatusInternalServerError, fmt.Sprintf("network diagnostic failed: %v", recovered))
-		}
-	}()
-	raw := make(map[string]string)
-	errs := make(map[string]string)
-	diag := networkDiagnostic{
-		USBDevice:     a.currentUSBDevice(),
-		MacInterfaces: discoverMacNetworkInterfaces(),
-		DefaultRoute:  discoverMacDefaultRoute(),
-		Raw:           raw,
-		Errors:        errs,
-	}
-	diag.USBNetworkPresent = hasLikelyUSBNetworkInterface(diag.MacInterfaces)
-
-	commands := map[string]string{
-		"usbnet":  `AT+QCFG="usbnet"`,
-		"usbcfg":  `AT+QCFG="usbcfg"`,
-		"cgdcont": `AT+CGDCONT?`,
-		"cgact":   `AT+CGACT?`,
-		"cgpaddr": `AT+CGPADDR=1`,
-	}
-	for key, command := range commands {
-		resp, err := a.runATCommand(command, 8*time.Second)
-		if err != nil {
-			errs[key] = err.Error()
-			continue
-		}
-		raw[key] = resp
-	}
-
-	diag.USBNetMode = parseUSBNetMode(raw["usbnet"])
-	diag.USBCfg = parseUSBATPrefixed(raw["usbcfg"], "+QCFG:")
-	diag.PDPContexts = parsePDPContexts(raw["cgdcont"])
-	diag.ActiveContexts = parseActivePDPContexts(raw["cgact"])
-	diag.PDPAddresses = parsePDPAddresses(raw["cgpaddr"])
-	if len(errs) == 0 {
-		diag.Errors = nil
+	diag, err := a.NetworkDiagnostic()
+	if err != nil {
+		writeServiceError(w, err)
+		return
 	}
 	writeJSON(w, http.StatusOK, diag)
 }
 
 func (a *app) networkTraffic(w http.ResponseWriter, _ *http.Request) {
-	snapshot := networkTrafficSnapshot{
-		SampledAtMS: time.Now().UnixMilli(),
-	}
-
-	interfaces := discoverMacNetworkInterfaces()
-	name := selectUSBTrafficInterface(interfaces, discoverMacDefaultRoute())
-	if name == "" {
-		writeJSON(w, http.StatusOK, snapshot)
-		return
-	}
-	counters, err := discoverMacInterfaceCounters()
-	if err != nil {
-		snapshot.Interface = name
-		snapshot.Error = err.Error()
-		writeJSON(w, http.StatusOK, snapshot)
-		return
-	}
-	current, ok := counters[name]
-	if !ok {
-		snapshot.Interface = name
-		snapshot.Error = "未读取到网卡计数"
-		writeJSON(w, http.StatusOK, snapshot)
-		return
-	}
-
-	a.trafficMu.Lock()
-	if a.trafficBaselines == nil {
-		a.trafficBaselines = make(map[string]networkByteCounters)
-	}
-	baseline, exists := a.trafficBaselines[name]
-	if !exists || current.RX < baseline.RX || current.TX < baseline.TX {
-		baseline = current
-		a.trafficBaselines[name] = baseline
-	}
-	a.trafficMu.Unlock()
-
-	snapshot.Available = true
-	snapshot.Interface = name
-	snapshot.RXBytes = current.RX
-	snapshot.TXBytes = current.TX
-	snapshot.SessionRX, snapshot.SessionTX, snapshot.SessionTotal = sessionTrafficFromCounters(current, baseline)
-	writeJSON(w, http.StatusOK, snapshot)
+	writeJSON(w, http.StatusOK, a.NetworkTraffic())
 }
 
 func sessionTrafficFromCounters(current, baseline networkByteCounters) (rx, tx, total uint64) {
@@ -1383,78 +1267,11 @@ func sessionTrafficFromCounters(current, baseline networkByteCounters) (rx, tx, 
 }
 
 func (a *app) check4GRoute(w http.ResponseWriter, _ *http.Request) {
-	route := discoverMacDefaultRoute()
-	interfaces := discoverMacNetworkInterfaces()
-	var active *macNetInterface
-	for i := range interfaces {
-		if interfaces[i].Name == route.Interface {
-			active = &interfaces[i]
-			break
-		}
-	}
-	if route.Interface == "" {
-		writeJSON(w, http.StatusOK, networkCheckResult{
-			OK:      false,
-			Summary: "未读取到默认出口",
-			Detail:  "macOS 没有返回 default route",
-		})
-		return
-	}
-	if active != nil && active.Name != "en0" && active.Kind == "ethernet" && active.Status == "active" {
-		writeJSON(w, http.StatusOK, networkCheckResult{
-			OK:      true,
-			Summary: "当前正在走 4G 模块",
-			Detail:  fmt.Sprintf("默认出口 %s -> %s，IP %s", route.Interface, route.Gateway, active.IPv4),
-		})
-		return
-	}
-	detail := fmt.Sprintf("默认出口 %s -> %s", route.Interface, route.Gateway)
-	if active != nil && active.IPv4 != "" {
-		detail += "，IP " + active.IPv4
-	}
-	writeJSON(w, http.StatusOK, networkCheckResult{
-		OK:      false,
-		Summary: "当前没有优先走 4G 模块",
-		Detail:  detail,
-	})
+	writeJSON(w, http.StatusOK, a.Check4GRoute())
 }
 
 func (a *app) checkProxyRoute(w http.ResponseWriter, _ *http.Request) {
-	proxyURL, _ := url.Parse("http://127.0.0.1:7890")
-	client := &http.Client{
-		Timeout: 8 * time.Second,
-		Transport: &http.Transport{
-			Proxy: http.ProxyURL(proxyURL),
-		},
-	}
-	req, err := http.NewRequest(http.MethodHead, "https://www.google.com/generate_204", nil)
-	if err != nil {
-		writeJSON(w, http.StatusOK, networkCheckResult{OK: false, Summary: "代理检测请求创建失败", Detail: err.Error()})
-		return
-	}
-	resp, err := client.Do(req)
-	if err != nil {
-		writeJSON(w, http.StatusOK, networkCheckResult{
-			OK:      false,
-			Summary: "代理未打通",
-			Detail:  "127.0.0.1:7890 代理访问失败：" + err.Error(),
-		})
-		return
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode == http.StatusNoContent || (resp.StatusCode >= 200 && resp.StatusCode < 400) {
-		writeJSON(w, http.StatusOK, networkCheckResult{
-			OK:      true,
-			Summary: "代理已打通",
-			Detail:  fmt.Sprintf("127.0.0.1:7890 -> google generate_204 返回 %s", resp.Status),
-		})
-		return
-	}
-	writeJSON(w, http.StatusOK, networkCheckResult{
-		OK:      false,
-		Summary: "代理响应异常",
-		Detail:  fmt.Sprintf("127.0.0.1:7890 返回 %s", resp.Status),
-	})
+	writeJSON(w, http.StatusOK, a.CheckProxyRoute())
 }
 
 func (a *app) setUSBNetMode(w http.ResponseWriter, r *http.Request) {
@@ -1464,33 +1281,21 @@ func (a *app) setUSBNetMode(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &body) {
 		return
 	}
-	if body.Mode < 0 || body.Mode > 3 {
-		writeError(w, http.StatusBadRequest, "only usbnet mode 0, 1, 2 or 3 is allowed")
-		return
-	}
-	command := fmt.Sprintf(`AT+QCFG="usbnet",%d`, body.Mode)
-	response, err := a.runATCommand(command, 8*time.Second)
+	result, err := a.SetUSBNetMode(body.Mode)
 	if err != nil {
-		writeError(w, http.StatusBadGateway, err.Error())
+		writeServiceError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"mode":         body.Mode,
-		"response":     response,
-		"needs_reboot": true,
-	})
+	writeJSON(w, http.StatusOK, result)
 }
 
 func (a *app) rebootModule(w http.ResponseWriter, _ *http.Request) {
-	response, err := a.runATCommand("AT+CFUN=1,1", 3*time.Second)
+	result, err := a.RebootModule()
 	if err != nil {
-		writeError(w, http.StatusBadGateway, err.Error())
+		writeServiceError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusAccepted, map[string]any{
-		"accepted": true,
-		"response": response,
-	})
+	writeJSON(w, http.StatusAccepted, result)
 }
 
 func parseUSBNetMode(resp string) string {
