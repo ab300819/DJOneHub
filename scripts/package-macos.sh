@@ -1,9 +1,27 @@
 #!/bin/sh
 set -eu
 
+# Usage: package-macos.sh [version] [arch]
+#
+# Builds one release package for a single target architecture. `arch` accepts
+# either the Go or the clang spelling (arm64, amd64/x86_64) and defaults to the
+# host architecture. Cross-building works because the macOS SDK carries both
+# slices; only the arm64 output has been verified on real hardware.
+
 ROOT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 VERSION=${1:-dev}
-PACKAGE_NAME="DJOneHub-macOS-arm64-${VERSION}"
+TARGET=${2:-$(uname -m)}
+
+case "${TARGET}" in
+  arm64|aarch64) GOARCH_TARGET=arm64; CLANG_ARCH=arm64 ;;
+  amd64|x86_64)  GOARCH_TARGET=amd64; CLANG_ARCH=x86_64 ;;
+  *)
+    echo "Unsupported architecture: ${TARGET} (expected arm64 or x86_64)." >&2
+    exit 1
+    ;;
+esac
+
+PACKAGE_NAME="DJOneHub-macOS-${CLANG_ARCH}-${VERSION}"
 STAGE_ROOT="${ROOT_DIR}/dist/release"
 STAGE_DIR="${STAGE_ROOT}/${PACKAGE_NAME}"
 ARCHIVE="${STAGE_ROOT}/${PACKAGE_NAME}.zip"
@@ -11,14 +29,14 @@ CHECKSUM="${ARCHIVE}.sha256"
 LIBUSB_VERSION=1.0.30
 LIBUSB_SHA256=fea36f34f9156400209595e300840767ab1a385ede1dc7ee893015aea9c6dbaf
 LIBUSB_URL="https://github.com/libusb/libusb/releases/download/v${LIBUSB_VERSION}/libusb-${LIBUSB_VERSION}.tar.bz2"
-BUILD_ROOT="${TMPDIR:-/tmp}/djonehub-macos-package-arm64"
+BUILD_ROOT="${TMPDIR:-/tmp}/djonehub-macos-package-${CLANG_ARCH}"
 LIBUSB_ARCHIVE="${BUILD_ROOT}/libusb-${LIBUSB_VERSION}.tar.bz2"
 LIBUSB_SOURCE="${BUILD_ROOT}/libusb-source"
 LIBUSB_PREFIX="${BUILD_ROOT}/libusb-prefix"
 LIBUSB_OBJECTS="${BUILD_ROOT}/libusb-objects"
 
-if [ "$(uname -m)" != "arm64" ]; then
-  echo "This packaging script currently requires an Apple Silicon Mac." >&2
+if [ "$(uname -s)" != "Darwin" ]; then
+  echo "This packaging script must run on macOS." >&2
   exit 1
 fi
 if ! command -v go >/dev/null 2>&1; then
@@ -74,12 +92,12 @@ for source in \
   libusb/os/darwin_usb.c
 do
   object="${LIBUSB_OBJECTS}/$(basename "${source}" .c).o"
-  clang -arch arm64 -mmacosx-version-min=13.0 -DHAVE_CONFIG_H \
+  clang -arch "${CLANG_ARCH}" -mmacosx-version-min=13.0 -DHAVE_CONFIG_H \
     -I"${LIBUSB_SOURCE}" -I"${LIBUSB_SOURCE}/libusb" -fPIC \
     -c "${LIBUSB_SOURCE}/${source}" -o "${object}"
 done
 
-clang -arch arm64 -mmacosx-version-min=13.0 -dynamiclib \
+clang -arch "${CLANG_ARCH}" -mmacosx-version-min=13.0 -dynamiclib \
   -install_name "@executable_path/../lib/libusb-1.0.0.dylib" \
   -compatibility_version 7.0.0 -current_version 7.0.0 \
   -o "${LIBUSB_PREFIX}/lib/libusb-1.0.0.dylib" \
@@ -94,7 +112,8 @@ rm -rf "${GOCACHE}"
 mkdir -p "${GOCACHE}"
 export GOCACHE
 PKG_CONFIG_PATH="${LIBUSB_SOURCE}" \
-MACOSX_DEPLOYMENT_TARGET=13.0 CGO_ENABLED=1 GOOS=darwin GOARCH=arm64 go build \
+MACOSX_DEPLOYMENT_TARGET=13.0 CGO_ENABLED=1 GOOS=darwin GOARCH="${GOARCH_TARGET}" \
+CC="clang -arch ${CLANG_ARCH} -mmacosx-version-min=13.0" go build \
   -p 2 \
   -trimpath -buildvcs=false -ldflags="-s -w" \
   -o "${STAGE_DIR}/bin/djonehub-macos" ./cmd/djonehub-macos

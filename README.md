@@ -314,7 +314,7 @@ go test ./...
 构建发行包：
 
 ```sh
-./scripts/package-macos-arm64.sh v0.1.0-preview
+./scripts/package-macos.sh v0.1.0-preview
 ```
 
 生成的发行目录、ZIP 和 SHA-256 文件位于：

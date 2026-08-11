@@ -22,12 +22,23 @@ run_privileged() {
   fi
 }
 
-if [ "$(uname -m)" != "arm64" ]; then
-  echo "当前安装包仅支持 Apple Silicon（M 系列芯片）。" >&2
+if [ "$(uname -s)" != "Darwin" ]; then
+  echo "本安装包仅支持 macOS。" >&2
   exit 1
 fi
 if [ ! -x "${PACKAGE_DIR}/djonehub" ] || [ ! -x "${PACKAGE_DIR}/bin/djonehub-macos" ]; then
   echo "安装失败：发行包内容不完整，请重新解压整个 ZIP。" >&2
+  exit 1
+fi
+
+HOST_ARCH=$(uname -m)
+case "$(file -b "${PACKAGE_DIR}/bin/djonehub-macos")" in
+  *arm64*) PACKAGE_ARCH=arm64 ;;
+  *x86_64*) PACKAGE_ARCH=x86_64 ;;
+  *) PACKAGE_ARCH=unknown ;;
+esac
+if [ "${PACKAGE_ARCH}" != "${HOST_ARCH}" ]; then
+  echo "本发行包为 ${PACKAGE_ARCH} 架构，与当前 Mac（${HOST_ARCH}）不匹配，请下载对应架构的发行包。" >&2
   exit 1
 fi
 

@@ -27,7 +27,7 @@ DJOneHub-source-minimal/
 │   └── THIRD_PARTY_NOTICES.md
 ├── scripts/
 │   ├── build-macos.sh        # 本地开发构建
-│   └── package-macos-arm64.sh# Apple Silicon 发行包构建
+│   └── package-macos.sh      # 指定平台发行包构建（默认宿主机架构）
 ├── go.mod
 ├── go.sum
 ├── LICENSE
@@ -68,7 +68,7 @@ go test -mod=mod ./...
 生成 Apple Silicon 发行包：
 
 ```sh
-./scripts/package-macos-arm64.sh v0.1.0-preview
+./scripts/package-macos.sh v0.1.0-preview
 ```
 
 构建脚本会从 libusb 官方 Release 下载源码、核对 SHA-256，并将编译后的动态库与 DJOneHub 一起打包。

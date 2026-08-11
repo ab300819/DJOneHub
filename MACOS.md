@@ -42,7 +42,7 @@ Requirements:
 - Go 1.26 or newer
 
 ```sh
-./scripts/package-macos-arm64.sh v0.1.0-preview
+./scripts/package-macos.sh v0.1.0-preview
 ```
 
 Release outputs:
