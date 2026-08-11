@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -70,9 +71,25 @@ func serveStdio(svc service.Service) {
 }
 
 func dispatchStdio(svc service.Service, request stdioRequest) stdioResponse {
+	ok := func(result any) stdioResponse {
+		return stdioResponse{ID: request.ID, OK: true, Result: result}
+	}
+	// bind decodes this request's params, reporting a failure the caller can
+	// return directly when the payload does not fit.
+	bind := func(target any) *stdioResponse {
+		if len(request.Params) == 0 {
+			return nil
+		}
+		if err := json.Unmarshal(request.Params, target); err != nil {
+			failure := stdioFailure(request.ID, err)
+			return &failure
+		}
+		return nil
+	}
+
 	switch request.Method {
 	case "health":
-		return stdioResponse{ID: request.ID, OK: true, Result: svc.Health()}
+		return ok(svc.Health())
 
 	case "status":
 		status, err := svc.Status()
@@ -80,25 +97,184 @@ func dispatchStdio(svc service.Service, request stdioRequest) stdioResponse {
 			return stdioFailure(request.ID, err)
 		}
 		if status.Device != nil {
-			return stdioResponse{ID: request.ID, OK: true,
-				Result: statusResult{Kind: "device", Device: status.Device}}
+			return ok(statusResult{Kind: "device", Device: status.Device})
 		}
-		return stdioResponse{ID: request.ID, OK: true,
-			Result: statusResult{Kind: "degraded", Degraded: status.Degraded}}
+		return ok(statusResult{Kind: "degraded", Degraded: status.Degraded})
 
 	case "at":
 		var params struct {
 			Command string `json:"command"`
 		}
-		if err := json.Unmarshal(request.Params, &params); err != nil {
-			return stdioFailure(request.ID, err)
+		if failure := bind(&params); failure != nil {
+			return *failure
 		}
 		response, err := svc.ExecuteAT(params.Command)
 		if err != nil {
 			return stdioFailure(request.ID, err)
 		}
-		return stdioResponse{ID: request.ID, OK: true,
-			Result: map[string]string{"response": response}}
+		return ok(map[string]string{"response": response})
+
+	case "sms.list":
+		return ok(svc.ListSMS())
+
+	case "sms.status":
+		return ok(svc.SMSStatus())
+
+	case "sms.refresh":
+		result, err := svc.RefreshSMS()
+		if err != nil {
+			return stdioFailure(request.ID, err)
+		}
+		return ok(result)
+
+	case "sms.clear":
+		result, err := svc.ClearModuleSMS()
+		if err != nil {
+			return stdioFailure(request.ID, err)
+		}
+		return ok(result)
+
+	case "sms.send":
+		var params struct {
+			Phone   string `json:"phone"`
+			Message string `json:"message"`
+		}
+		if failure := bind(&params); failure != nil {
+			return *failure
+		}
+		result, err := svc.SendSMS(params.Phone, params.Message)
+		if err != nil {
+			return stdioFailure(request.ID, err)
+		}
+		return ok(result)
+
+	case "network.diagnostic":
+		result, err := svc.NetworkDiagnostic()
+		if err != nil {
+			return stdioFailure(request.ID, err)
+		}
+		return ok(result)
+
+	case "network.traffic":
+		return ok(svc.NetworkTraffic())
+
+	case "network.check4g":
+		return ok(svc.Check4GRoute())
+
+	case "network.checkProxy":
+		return ok(svc.CheckProxyRoute())
+
+	case "network.usbnet":
+		var params struct {
+			Mode int `json:"mode"`
+		}
+		if failure := bind(&params); failure != nil {
+			return *failure
+		}
+		result, err := svc.SetUSBNetMode(params.Mode)
+		if err != nil {
+			return stdioFailure(request.ID, err)
+		}
+		return ok(result)
+
+	case "network.reboot":
+		result, err := svc.RebootModule()
+		if err != nil {
+			return stdioFailure(request.ID, err)
+		}
+		return ok(result)
+
+	case "esim.overview":
+		result, err := svc.ESIMOverview()
+		if err != nil {
+			return stdioFailure(request.ID, err)
+		}
+		return ok(result)
+
+	case "esim.health":
+		result, err := svc.ESIMHealth()
+		if err != nil {
+			return stdioFailure(request.ID, err)
+		}
+		return ok(result)
+
+	case "esim.notes.list":
+		notes, err := svc.ListESIMNotes()
+		if err != nil {
+			return stdioFailure(request.ID, err)
+		}
+		return ok(notes)
+
+	case "esim.notes.save":
+		var params service.ProfileNoteInput
+		if failure := bind(&params); failure != nil {
+			return *failure
+		}
+		result, err := svc.SaveESIMNote(params)
+		if err != nil {
+			return stdioFailure(request.ID, err)
+		}
+		return ok(result)
+
+	case "esim.moduleNotes.list":
+		result, err := svc.ListModuleESIMNotes()
+		if err != nil {
+			return stdioFailure(request.ID, err)
+		}
+		return ok(result)
+
+	case "esim.moduleNotes.save":
+		var params service.ModuleProfileNote
+		if failure := bind(&params); failure != nil {
+			return *failure
+		}
+		result, err := svc.SaveModuleESIMNote(params)
+		if err != nil {
+			return stdioFailure(request.ID, err)
+		}
+		return ok(result)
+
+	case "esim.download":
+		var params service.ESIMDownloadRequest
+		if failure := bind(&params); failure != nil {
+			return *failure
+		}
+		result, err := svc.DownloadESIMProfile(context.Background(), params)
+		if err != nil {
+			return stdioFailure(request.ID, err)
+		}
+		return ok(result)
+
+	case "esim.switch":
+		var params struct {
+			ICCID string `json:"iccid"`
+			AID   string `json:"aid"`
+		}
+		if failure := bind(&params); failure != nil {
+			return *failure
+		}
+		result, err := svc.SwitchESIMProfile(context.Background(), params.ICCID, params.AID)
+		if err != nil {
+			return stdioFailure(request.ID, err)
+		}
+		return ok(result)
+
+	case "esim.delete":
+		var params struct {
+			ICCID string `json:"iccid"`
+			AID   string `json:"aid"`
+		}
+		if failure := bind(&params); failure != nil {
+			return *failure
+		}
+		result, err := svc.DeleteESIMProfile(params.ICCID, params.AID)
+		if err != nil {
+			return stdioFailure(request.ID, err)
+		}
+		return ok(result)
+
+	case "esim.phonebookProbe":
+		return ok(svc.ProbeESIMPhonebook())
 
 	default:
 		return stdioFailure(request.ID, errors.New("unknown method: "+request.Method))
