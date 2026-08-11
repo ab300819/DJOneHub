@@ -187,6 +187,7 @@ func main() {
 	flag.StringVar(&port, "port", "", "AT serial port; auto-detected when omitted")
 	flag.StringVar(&listen, "listen", "127.0.0.1:7575", "HTTP listen address")
 	flag.BoolVar(&demo, "demo", false, "run the web UI with simulated modem data")
+	flag.IntVar(&parentPID, "parent-pid", 0, "exit when this parent process goes away; used by the macOS app")
 	flag.Parse()
 
 	if demo {
@@ -318,6 +319,28 @@ func (a *app) installESIMManager(manager *esim.Manager, switchAllowed bool) bool
 	return true
 }
 
+// parentPID is set by -parent-pid. When the macOS app spawns this process it
+// passes its own pid so the core cannot outlive its parent and keep holding the
+// USB interface, which signal handlers alone cannot guarantee: a crashed or
+// force-quit parent never gets to send a signal.
+var parentPID int
+
+// watchParent closes the returned channel once the process is reparented, which
+// on Darwin happens as soon as the original parent exits.
+func watchParent(pid int) <-chan struct{} {
+	gone := make(chan struct{})
+	go func() {
+		defer close(gone)
+		for {
+			if os.Getppid() != pid {
+				return
+			}
+			time.Sleep(time.Second)
+		}
+	}()
+	return gone
+}
+
 func serve(instance *app, listen string) {
 	server := &http.Server{
 		Addr:              listen,
@@ -336,10 +359,22 @@ func serve(instance *app, listen string) {
 		serveErr <- server.ListenAndServe()
 	}()
 
+	var parentGone <-chan struct{}
+	if parentPID > 0 {
+		parentGone = watchParent(parentPID)
+	}
+
 	select {
 	case err := <-serveErr:
 		if !errors.Is(err, http.ErrServerClosed) {
 			log.Printf("HTTP server stopped unexpectedly: %v", err)
+		}
+	case <-parentGone:
+		log.Printf("DJOneHub parent process exited, stopping")
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := server.Shutdown(shutdownCtx); err != nil {
+			log.Printf("HTTP server shutdown: %v", err)
 		}
 	case <-ctx.Done():
 		log.Printf("DJOneHub is stopping")
