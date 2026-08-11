@@ -28,7 +28,6 @@ DJOneHub-source-minimal/
 ├── scripts/
 │   ├── build-macos.sh        # 本地开发构建
 │   └── package-macos-arm64.sh# Apple Silicon 发行包构建
-├── third_party/              # 当前构建实际使用的本地第三方源码
 ├── go.mod
 ├── go.sum
 ├── LICENSE
@@ -44,11 +43,11 @@ DJOneHub-source-minimal/
 - `cmd/djonehub-macos/usbat_esim_channel.go`：经 AT/APDU 访问实体 eUICC 卡片。
 - `cmd/djonehub-macos/web/`：由 `go:embed` 编译进二进制的网页界面。
 
-## 为什么仍有 internal、pkg 和 third_party
+## 为什么仍有 internal 和 pkg
 
 Go 以“包”为编译边界。macOS 主程序虽然集中在 `cmd/djonehub-macos`，但短信 PDU、eUICC、SIM APDU、MBIM/QMI 和日志能力依赖共享包，因此这些目录不能直接删除。
 
-`third_party` 中只保留当前依赖图实际使用的本地替换模块。保留本地副本可以确保当前修改版协议实现与已验证发行包一致，同时保留各上游组件的许可证和来源信息。
+第三方依赖统一由 Go module 系统解析，版本与校验和固定在 `go.mod` 和 `go.sum` 中，仓库内不再保留副本。
 
 ## 已排除内容
 

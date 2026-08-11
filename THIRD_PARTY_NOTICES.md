@@ -14,19 +14,23 @@ The macOS release package includes **libusb 1.0.30**, distributed under the GNU 
 - Source: <https://github.com/libusb/libusb/releases/tag/v1.0.30>
 - License text in the release package: `licenses/libusb-COPYING`
 
-## Vendored Source Dependencies
+## Source Dependencies
 
-The source repository includes vendored dependencies under `third_party/` so the versions used by DJOneHub remain reproducible. Their original copyright notices and license texts are retained in the corresponding directories.
+All Go dependencies are resolved through the standard module system and pinned by
+`go.mod` and `go.sum`. Reproducibility comes from those checksums rather than from
+copies committed to this repository.
 
-| Component | License file |
+Key components and their upstreams:
+
+| Component | Upstream |
 | --- | --- |
-| euicc-go | `third_party/euicc-go/LICENSE` |
-| uicc-go | `third_party/uicc-go/LICENSE` |
-| quectel-qmi-go | `third_party/quectel-qmi-go/LICENSE` |
-| strftime | `third_party/strftime/LICENSE` |
-| pkg/errors | `third_party/pkg-errors/LICENSE` |
-| golang.org/x/sys | `third_party/x-sys/LICENSE` |
-| golang.org/x/text | `third_party/x-text/LICENSE` |
-| multierr | `third_party/multierr/LICENSE.txt` |
+| euicc-go | <https://github.com/damonto/euicc-go> |
+| uicc-go | <https://github.com/damonto/uicc-go> |
+| quectel-qmi-go | <https://github.com/iniwex5/quectel-qmi-go> |
+| strftime | <https://github.com/lestrrat-go/strftime> |
+| pkg/errors | <https://github.com/pkg/errors> |
+| golang.org/x/sys | <https://pkg.go.dev/golang.org/x/sys> |
+| golang.org/x/text | <https://pkg.go.dev/golang.org/x/text> |
+| multierr | <https://github.com/uber-go/multierr> |
 
 Dependencies fetched through Go modules retain their own licenses and copyright notices. This file is informational and does not replace any component's full license text.

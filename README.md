@@ -381,7 +381,7 @@ DJOneHub 是在研究大疆第一代 4G 模块和原 VoHive 项目的基础上�
 
 - [LICENSE](LICENSE)
 - [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)
-- 各 `third_party` 目录内随附的许可证与声明
+- `go.mod` 中记录的各依赖上游仓库
 
 ## 许可证
 
