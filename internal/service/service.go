@@ -8,10 +8,12 @@
 package service
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"time"
 
+	"github.com/ab300819/DJOneHub/internal/esim"
 	"github.com/ab300819/DJOneHub/internal/modem"
 )
 
@@ -98,6 +100,144 @@ type Service interface {
 	SetUSBNetMode(mode int) (USBNetResult, error)
 	// RebootModule asks the module to restart.
 	RebootModule() (RebootResult, error)
+
+	// ESIMOverview reads the card's chip info and installed profiles.
+	ESIMOverview() (ESIMOverviewResult, error)
+	// ESIMHealth cross-checks the enabled profile against the module's registration.
+	ESIMHealth() (ESIMHealthResult, error)
+	// ListESIMNotes returns the locally stored per-ICCID notes.
+	ListESIMNotes() (map[string]ProfileNote, error)
+	// SaveESIMNote stores or clears a local note; empty fields delete it.
+	SaveESIMNote(note ProfileNoteInput) (SavedNote, error)
+	// ListModuleESIMNotes reads the notes kept in the module's own phonebook.
+	ListModuleESIMNotes() (ModuleNotes, error)
+	// SaveModuleESIMNote writes or deletes a note in the module's phonebook.
+	SaveModuleESIMNote(note ModuleProfileNote) (ModuleNoteResult, error)
+	// DownloadESIMProfile fetches a profile from an SM-DP+ server.
+	DownloadESIMProfile(ctx context.Context, request ESIMDownloadRequest) (ESIMDownloadResult, error)
+	// SwitchESIMProfile enables a different profile and restarts the module.
+	SwitchESIMProfile(ctx context.Context, iccid, aid string) (ESIMSwitchResult, error)
+	// DeleteESIMProfile removes a profile from the card.
+	DeleteESIMProfile(iccid, aid string) (ESIMDeleteResult, error)
+	// ProbeESIMPhonebook reports which phonebook operations the module supports.
+	ProbeESIMPhonebook() PhonebookProbe
+}
+
+// ESIMOverviewResult is the card contents, or a note that it is a plain SIM.
+//
+// Demo payloads are fixture data rather than a real read, so they are carried
+// as-is instead of being forced through the typed field.
+type ESIMOverviewResult struct {
+	PhysicalSIM bool
+	Message     string
+	Overview    *esim.EsimOverview
+	DemoPayload any
+}
+
+// ESIMHealthResult pairs the enabled profile with the module's own view of it.
+type ESIMHealthResult struct {
+	PhysicalSIM   bool
+	OK            bool
+	Message       string
+	ActiveProfile *esim.ProfileItem
+	ModuleICCID   string
+	IMSI          string
+	Operator      string
+	Registration  string
+	Registered    bool
+	SignalDBM     int
+	NetworkMode   string
+}
+
+// ProfileNote is a locally stored note about one profile.
+type ProfileNote struct {
+	Label string `json:"label"`
+	Phone string `json:"phone"`
+	Tags  string `json:"tags"`
+}
+
+// ProfileNoteInput is a note submitted for storage.
+type ProfileNoteInput struct {
+	ICCID string `json:"iccid"`
+	Label string `json:"label"`
+	Phone string `json:"phone"`
+	Tags  string `json:"tags"`
+}
+
+// SavedNote confirms a stored note.
+type SavedNote struct {
+	Message string      `json:"message"`
+	Note    ProfileNote `json:"note"`
+}
+
+// ModuleProfileNote is a note kept in the module's own phonebook.
+type ModuleProfileNote struct {
+	Index int    `json:"index"`
+	ICCID string `json:"iccid"`
+	Label string `json:"label"`
+	Phone string `json:"phone"`
+	Tags  string `json:"tags"`
+}
+
+// ModuleNotes is the module phonebook's contents and capacity.
+type ModuleNotes struct {
+	Notes map[string]ModuleProfileNote `json:"notes"`
+	Used  int                          `json:"used"`
+	Total int                          `json:"total"`
+}
+
+// ModuleNoteResult confirms a phonebook write; Index is absent for deletions.
+type ModuleNoteResult struct {
+	Message string `json:"message"`
+	Index   *int   `json:"index,omitempty"`
+}
+
+// ESIMDownloadRequest carries the activation details of a profile.
+type ESIMDownloadRequest struct {
+	SMDP             string `json:"smdp"`
+	MatchingID       string `json:"matching_id"`
+	ConfirmationCode string `json:"confirmation_code"`
+	AID              string `json:"aid"`
+	IMEI             string `json:"imei"`
+}
+
+// ESIMDownloadResult reports a completed download.
+type ESIMDownloadResult struct {
+	Demo    bool
+	Message string
+	Result  *esim.DownloadProfileResult
+}
+
+// ESIMDeleteResult reports a completed deletion.
+type ESIMDeleteResult struct {
+	Demo    bool
+	Message string
+	Result  *esim.DeleteProfileResult
+}
+
+// ESIMSwitchResult reports a profile switch and the module restart that follows
+// it, which is needed because the modem can otherwise keep the previous SIM
+// session alive.
+type ESIMSwitchResult struct {
+	Demo                  bool
+	SwitchAccepted        bool
+	Phase                 string
+	TargetICCID           string
+	RecoveryPending       bool
+	ModuleRebootRequested bool
+	ModuleRebootResponse  string
+	ModuleRebootWarning   string
+	ReconnectWaitSeconds  int
+}
+
+// PhonebookProbe reports which phonebook operations the module supports.
+type PhonebookProbe struct {
+	StorageSupported bool              `json:"storage_supported"`
+	StorageSelected  bool              `json:"storage_selected"`
+	ReadSupported    bool              `json:"read_supported"`
+	WriteSupported   bool              `json:"write_supported"`
+	StorageStatus    string            `json:"storage_status"`
+	Responses        map[string]string `json:"responses"`
 }
 
 // NetworkDiagnostic is everything the core can say about data connectivity.

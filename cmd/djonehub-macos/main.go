@@ -38,28 +38,11 @@ var webAssets embed.FS
 
 type receivedSMS = service.ReceivedSMS
 
-type profileNote struct {
-	Label string `json:"label"`
-	Phone string `json:"phone"`
-	Tags  string `json:"tags"`
-}
+type profileNote = service.ProfileNote
 
-type phonebookProbeResult struct {
-	StorageSupported bool              `json:"storage_supported"`
-	StorageSelected  bool              `json:"storage_selected"`
-	ReadSupported    bool              `json:"read_supported"`
-	WriteSupported   bool              `json:"write_supported"`
-	StorageStatus    string            `json:"storage_status"`
-	Responses        map[string]string `json:"responses"`
-}
+type phonebookProbeResult = service.PhonebookProbe
 
-type moduleProfileNote struct {
-	Index int    `json:"index"`
-	ICCID string `json:"iccid"`
-	Label string `json:"label"`
-	Phone string `json:"phone"`
-	Tags  string `json:"tags"`
-}
+type moduleProfileNote = service.ModuleProfileNote
 
 type modulePhonebookEntry struct {
 	Index  int
@@ -1542,53 +1525,25 @@ func (a *app) persistProfileNotesLocked() error {
 }
 
 func (a *app) listESIMNotes(w http.ResponseWriter, _ *http.Request) {
-	a.profileNotesMu.Lock()
-	defer a.profileNotesMu.Unlock()
-	if err := a.loadProfileNotesLocked(); err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+	notes, err := a.ListESIMNotes()
+	if err != nil {
+		writeServiceError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"notes": a.profileNotes})
+	writeJSON(w, http.StatusOK, map[string]any{"notes": notes})
 }
 
 func (a *app) saveESIMNote(w http.ResponseWriter, r *http.Request) {
-	var body struct {
-		ICCID string `json:"iccid"`
-		Label string `json:"label"`
-		Phone string `json:"phone"`
-		Tags  string `json:"tags"`
-	}
+	var body service.ProfileNoteInput
 	if !decodeJSON(w, r, &body) {
 		return
 	}
-	body.ICCID = strings.TrimSpace(body.ICCID)
-	body.Label = strings.TrimSpace(body.Label)
-	body.Phone = strings.TrimSpace(body.Phone)
-	body.Tags = strings.TrimSpace(body.Tags)
-	if body.ICCID == "" {
-		writeError(w, http.StatusBadRequest, "iccid is required")
+	result, err := a.SaveESIMNote(body)
+	if err != nil {
+		writeServiceError(w, err)
 		return
 	}
-	if len(body.Label) > 80 || len(body.Phone) > 80 || len(body.Tags) > 200 {
-		writeError(w, http.StatusBadRequest, "本地备注字段过长")
-		return
-	}
-	a.profileNotesMu.Lock()
-	defer a.profileNotesMu.Unlock()
-	if err := a.loadProfileNotesLocked(); err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	if body.Label == "" && body.Phone == "" && body.Tags == "" {
-		delete(a.profileNotes, body.ICCID)
-	} else {
-		a.profileNotes[body.ICCID] = profileNote{Label: body.Label, Phone: body.Phone, Tags: body.Tags}
-	}
-	if err := a.persistProfileNotesLocked(); err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"message": "本地备注已保存", "note": a.profileNotes[body.ICCID]})
+	writeJSON(w, http.StatusOK, result)
 }
 
 func atCommandSucceeded(response string) bool {
@@ -1609,40 +1564,7 @@ func (a *app) phonebookProbeCommand(command string, result *phonebookProbeResult
 // probeESIMPhonebook performs only AT test/read commands. It never writes a
 // phonebook entry, so it is safe to use before enabling portable card notes.
 func (a *app) probeESIMPhonebook(w http.ResponseWriter, _ *http.Request) {
-	result := phonebookProbeResult{Responses: make(map[string]string)}
-	if a.demo {
-		result.StorageSupported = true
-		result.StorageSelected = true
-		result.ReadSupported = true
-		result.WriteSupported = true
-		result.StorageStatus = `+CPBS: "SM",0,250`
-		result.Responses[`AT+CPBS=?`] = `+CPBS: ("SM","ME")\r\nOK`
-		result.Responses[`AT+CPBR=?`] = `+CPBR: (1-250),40,14\r\nOK`
-		result.Responses[`AT+CPBW=?`] = `+CPBW: (1-250),40,(129,145),16\r\nOK`
-		writeJSON(w, http.StatusOK, result)
-		return
-	}
-
-	if !a.phonebookProbeCommand(`AT+CPBS=?`, &result) {
-		writeJSON(w, http.StatusOK, result)
-		return
-	}
-	result.StorageSupported = strings.Contains(strings.ToUpper(result.Responses[`AT+CPBS=?`]), `"SM"`)
-	if !result.StorageSupported {
-		writeJSON(w, http.StatusOK, result)
-		return
-	}
-	result.StorageSelected = a.phonebookProbeCommand(`AT+CPBS="SM"`, &result)
-	if !result.StorageSelected {
-		writeJSON(w, http.StatusOK, result)
-		return
-	}
-	if a.phonebookProbeCommand(`AT+CPBS?`, &result) {
-		result.StorageStatus = result.Responses[`AT+CPBS?`]
-	}
-	result.ReadSupported = a.phonebookProbeCommand(`AT+CPBR=?`, &result)
-	result.WriteSupported = a.phonebookProbeCommand(`AT+CPBW=?`, &result)
-	writeJSON(w, http.StatusOK, result)
+	writeJSON(w, http.StatusOK, a.ProbeESIMPhonebook())
 }
 
 const moduleNotePrefix = "VH1|"
@@ -1754,14 +1676,12 @@ func (a *app) readModuleESIMNotes() (map[string]moduleProfileNote, map[int]bool,
 }
 
 func (a *app) listModuleESIMNotes(w http.ResponseWriter, _ *http.Request) {
-	a.moduleNotesMu.Lock()
-	defer a.moduleNotesMu.Unlock()
-	notes, _, used, total, err := a.readModuleESIMNotes()
+	result, err := a.ListModuleESIMNotes()
 	if err != nil {
-		writeError(w, http.StatusBadGateway, fmt.Sprintf("读取模块资料库失败: %v", err))
+		writeServiceError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"notes": notes, "used": used, "total": total})
+	writeJSON(w, http.StatusOK, result)
 }
 
 func (a *app) saveModuleESIMNote(w http.ResponseWriter, r *http.Request) {
@@ -1769,104 +1689,31 @@ func (a *app) saveModuleESIMNote(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &body) {
 		return
 	}
-	a.moduleNotesMu.Lock()
-	defer a.moduleNotesMu.Unlock()
-	notes, occupied, _, total, err := a.readModuleESIMNotes()
+	result, err := a.SaveModuleESIMNote(body)
 	if err != nil {
-		writeError(w, http.StatusBadGateway, fmt.Sprintf("读取模块资料库失败: %v", err))
+		writeServiceError(w, err)
 		return
 	}
-	current, exists := notes[strings.TrimSpace(body.ICCID)]
-	if strings.TrimSpace(body.Label) == "" && strings.TrimSpace(body.Phone) == "" && strings.TrimSpace(body.Tags) == "" {
-		if !exists {
-			writeJSON(w, http.StatusOK, map[string]string{"message": "模块资料库中没有此记录"})
-			return
-		}
-		if _, err := a.runATOK(fmt.Sprintf("AT+CPBW=%d", current.Index), 8*time.Second); err != nil {
-			writeError(w, http.StatusBadGateway, fmt.Sprintf("删除模块资料失败: %v", err))
-			return
-		}
-		writeJSON(w, http.StatusOK, map[string]string{"message": "模块资料已删除"})
-		return
-	}
-	encoded, err := encodeModuleProfileNote(body)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	index := current.Index
-	if !exists {
-		for candidate := 1; candidate <= total; candidate++ {
-			if !occupied[candidate] {
-				index = candidate
-				break
-			}
-		}
-	}
-	if index == 0 {
-		writeError(w, http.StatusConflict, "模块通讯录已满")
-		return
-	}
-	command := fmt.Sprintf(`AT+CPBW=%d,"00000000000",129,"%s"`, index, encoded)
-	if _, err := a.runATOK(command, 8*time.Second); err != nil {
-		writeError(w, http.StatusBadGateway, fmt.Sprintf("写入模块资料失败: %v", err))
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"message": "模块资料已保存", "index": index})
+	writeJSON(w, http.StatusOK, result)
 }
 
 func (a *app) esimOverview(w http.ResponseWriter, _ *http.Request) {
-	if a.demo {
-		writeJSON(w, http.StatusOK, map[string]any{
-			"chip_info": map[string]any{
-				"sku_name":      "eUICC Demo Card",
-				"serial_number": "DEMO-001",
-				"firmware":      "1.0.0",
-				"eids": []map[string]any{{
-					"aid": "A0000005591010FFFFFFFF8900000100",
-					"eid": "89049032000000000000000000000001",
-				}},
-			},
-			"profiles": []map[string]any{{
-				"eid":     "89049032000000000000000000000001",
-				"aid_hex": "A0000005591010FFFFFFFF8900000100",
-				"profiles": []map[string]any{
-					{
-						"iccid": "89860123456789012345", "name": "中国移动",
-						"service_provider_name": "China Mobile", "state": 1, "state_text": "enabled",
-					},
-					{
-						"iccid": "8944100000000000001", "name": "英国旅行卡",
-						"service_provider_name": "giffgaff UK", "state": 0, "state_text": "disabled",
-					},
-					{
-						"iccid": "8949020000000000002", "name": "欧洲数据卡",
-						"service_provider_name": "Travel Europe", "state": 0, "state_text": "disabled",
-					},
-				},
-			}},
-		})
-		return
-	}
-	esimManager, _ := a.currentESIMManager()
-	if esimManager == nil {
-		writeError(w, http.StatusServiceUnavailable, "eSIM manager is unavailable")
-		return
-	}
-	overview, err := esimManager.GetEsimOverview()
+	result, err := a.ESIMOverview()
 	if err != nil {
-		if isPhysicalSIMESIMProbeError(err) {
-			writeJSON(w, http.StatusOK, map[string]any{
-				"card_type": "physical_sim",
-				"message":   "当前卡片为实体卡，非 eSIM 卡片",
-			})
-			return
-		}
-		log.Printf("eSIM overview failed: %v", err)
-		writeError(w, http.StatusBadGateway, err.Error())
+		writeServiceError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, overview)
+	switch {
+	case result.DemoPayload != nil:
+		writeJSON(w, http.StatusOK, result.DemoPayload)
+	case result.PhysicalSIM:
+		writeJSON(w, http.StatusOK, map[string]any{
+			"card_type": "physical_sim",
+			"message":   result.Message,
+		})
+	default:
+		writeJSON(w, http.StatusOK, result.Overview)
+	}
 }
 
 // A normal physical SIM cannot open the GSMA eUICC management AIDs. The
@@ -1883,68 +1730,32 @@ func isPhysicalSIMESIMProbeError(err error) bool {
 }
 
 func (a *app) esimHealth(w http.ResponseWriter, _ *http.Request) {
-	esimManager, _ := a.currentESIMManager()
-	if esimManager == nil {
-		writeError(w, http.StatusServiceUnavailable, "eSIM manager is unavailable")
-		return
-	}
-	overview, err := esimManager.GetEsimOverview()
+	result, err := a.ESIMHealth()
 	if err != nil {
-		if isPhysicalSIMESIMProbeError(err) {
-			writeJSON(w, http.StatusOK, map[string]any{"card_type": "physical_sim"})
-			return
-		}
-		writeError(w, http.StatusBadGateway, err.Error())
+		writeServiceError(w, err)
 		return
 	}
-
-	var active *esim.ProfileItem
-	for _, group := range overview.Profiles {
-		for index := range group.Profiles {
-			if group.Profiles[index].State == 1 {
-				active = &group.Profiles[index]
-				break
-			}
-		}
-		if active != nil {
-			break
-		}
+	switch {
+	case result.PhysicalSIM:
+		writeJSON(w, http.StatusOK, map[string]any{"card_type": "physical_sim"})
+	case result.ActiveProfile == nil:
+		writeJSON(w, http.StatusOK, map[string]any{"ok": false, "message": result.Message})
+	default:
+		writeJSON(w, http.StatusOK, map[string]any{
+			"ok":             result.OK,
+			"active_profile": result.ActiveProfile,
+			"module_iccid":   result.ModuleICCID,
+			"imsi":           result.IMSI,
+			"operator":       result.Operator,
+			"registration":   result.Registration,
+			"registered":     result.Registered,
+			"signal_dbm":     result.SignalDBM,
+			"network_mode":   result.NetworkMode,
+		})
 	}
-	if active == nil {
-		writeJSON(w, http.StatusOK, map[string]any{"ok": false, "message": "eSIM 卡片已识别，但没有已启用的 Profile"})
-		return
-	}
-
-	if err := a.ensureUSBAT(); err != nil {
-		writeError(w, http.StatusServiceUnavailable, err.Error())
-		return
-	}
-	status, err := a.usbATStatus()
-	if err != nil {
-		a.resetUSBATIfGone(err)
-		writeError(w, http.StatusBadGateway, err.Error())
-		return
-	}
-	registered := status.RegStatus == 1 || status.RegStatus == 5
-	writeJSON(w, http.StatusOK, map[string]any{
-		"ok":             status.SimInserted && registered,
-		"active_profile": active,
-		"module_iccid":   status.ICCID,
-		"imsi":           status.IMSI,
-		"operator":       status.Operator,
-		"registration":   status.RegStatusText,
-		"registered":     registered,
-		"signal_dbm":     status.SignalDBM,
-		"network_mode":   status.NetworkMode,
-	})
 }
 
 func (a *app) switchESIM(w http.ResponseWriter, r *http.Request) {
-	esimManager, switchAllowed := a.currentESIMManager()
-	if !a.demo && esimManager == nil {
-		writeError(w, http.StatusServiceUnavailable, "eSIM manager is unavailable")
-		return
-	}
 	var body struct {
 		ICCID string `json:"iccid"`
 		AID   string `json:"aid"`
@@ -1952,57 +1763,28 @@ func (a *app) switchESIM(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &body) {
 		return
 	}
-	if strings.TrimSpace(body.ICCID) == "" {
-		writeError(w, http.StatusBadRequest, "iccid is required")
+	result, err := a.SwitchESIMProfile(r.Context(), body.ICCID, body.AID)
+	if err != nil {
+		writeServiceError(w, err)
 		return
 	}
-	if a.demo {
+	if result.Demo {
 		writeJSON(w, http.StatusOK, map[string]any{
-			"switch_accepted": true,
-			"phase":           "done",
-			"target_iccid":    body.ICCID,
+			"switch_accepted": result.SwitchAccepted,
+			"phase":           result.Phase,
+			"target_iccid":    result.TargetICCID,
 		})
 		return
-	}
-	if !switchAllowed && a.modem == nil {
-		writeError(w, http.StatusServiceUnavailable, "USB AT eSIM/卡片当前暂不允许切换 Profile")
-		return
-	}
-	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Minute)
-	defer cancel()
-	result, err := esimManager.SwitchProfileWithResult(ctx, body.ICCID, body.AID)
-	if err != nil {
-		writeError(w, http.StatusBadGateway, err.Error())
-		return
-	}
-
-	// Enabling a Profile resets the eUICC, but the DJI modem can keep the
-	// previous SIM session (and therefore its CNUM) until its own firmware is
-	// restarted.  Reload it here so the newly enabled Profile actually becomes
-	// the modem's active subscriber identity.
-	rebootResponse, rebootErr := a.runATCommand("AT+CFUN=1,1", 3*time.Second)
-	rebootRequested := rebootErr == nil
-	rebootWarning := ""
-	if rebootErr != nil {
-		// A USB disconnect immediately after CFUN is expected on some firmware;
-		// the command may already have been accepted before the bridge drops.
-		upper := strings.ToUpper(rebootErr.Error())
-		if strings.Contains(upper, "NO_DEVICE") || strings.Contains(upper, "NOT_FOUND") {
-			rebootRequested = true
-		} else {
-			rebootWarning = rebootErr.Error()
-			log.Printf("eSIM profile switched but module restart was not confirmed: %v", rebootErr)
-		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"switch_accepted":         result.SwitchAccepted,
 		"phase":                   result.Phase,
 		"target_iccid":            result.TargetICCID,
 		"recovery_pending":        result.RecoveryPending,
-		"module_reboot_requested": rebootRequested,
-		"module_reboot_response":  rebootResponse,
-		"module_reboot_warning":   rebootWarning,
-		"reconnect_wait_seconds":  10,
+		"module_reboot_requested": result.ModuleRebootRequested,
+		"module_reboot_response":  result.ModuleRebootResponse,
+		"module_reboot_warning":   result.ModuleRebootWarning,
+		"reconnect_wait_seconds":  result.ReconnectWaitSeconds,
 	})
 }
 
@@ -2038,11 +1820,6 @@ func (a *app) renameESIMProfile(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *app) deleteESIMProfile(w http.ResponseWriter, r *http.Request) {
-	esimManager, _ := a.currentESIMManager()
-	if !a.demo && esimManager == nil {
-		writeError(w, http.StatusServiceUnavailable, "eSIM manager is unavailable")
-		return
-	}
 	var body struct {
 		ICCID string `json:"iccid"`
 		AID   string `json:"aid"`
@@ -2050,62 +1827,33 @@ func (a *app) deleteESIMProfile(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &body) {
 		return
 	}
-	body.ICCID = strings.TrimSpace(body.ICCID)
-	if body.ICCID == "" {
-		writeError(w, http.StatusBadRequest, "iccid is required")
-		return
-	}
-	if a.demo {
-		writeJSON(w, http.StatusOK, map[string]string{"message": "Profile 已删除"})
-		return
-	}
-	result, err := esimManager.DeleteProfile(body.ICCID, body.AID)
+	result, err := a.DeleteESIMProfile(body.ICCID, body.AID)
 	if err != nil {
-		writeError(w, http.StatusBadGateway, fmt.Sprintf("删除 Profile 失败: %v", err))
+		writeServiceError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, result)
+	if result.Demo {
+		writeJSON(w, http.StatusOK, map[string]string{"message": result.Message})
+		return
+	}
+	writeJSON(w, http.StatusOK, result.Result)
 }
 
 func (a *app) downloadESIMProfile(w http.ResponseWriter, r *http.Request) {
-	esimManager, _ := a.currentESIMManager()
-	if !a.demo && esimManager == nil {
-		writeError(w, http.StatusServiceUnavailable, "eSIM manager is unavailable")
-		return
-	}
-	var body struct {
-		SMDP             string `json:"smdp"`
-		MatchingID       string `json:"matching_id"`
-		ConfirmationCode string `json:"confirmation_code"`
-		AID              string `json:"aid"`
-		IMEI             string `json:"imei"`
-	}
+	var body service.ESIMDownloadRequest
 	if !decodeJSON(w, r, &body) {
 		return
 	}
-	body.SMDP = strings.TrimSpace(strings.TrimPrefix(strings.TrimPrefix(body.SMDP, "https://"), "http://"))
-	if body.SMDP == "" {
-		writeError(w, http.StatusBadRequest, "smdp is required")
-		return
-	}
-	if strings.TrimSpace(body.IMEI) == "" {
-		writeError(w, http.StatusBadRequest, "imei is required for USB AT eSIM download")
-		return
-	}
-	if a.demo {
-		writeJSON(w, http.StatusOK, map[string]string{"message": "演示：Profile 下载完成"})
-		return
-	}
-	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Minute)
-	defer cancel()
-	result, err := esimManager.DownloadProfile(ctx, body.AID, body.SMDP, body.MatchingID, body.ConfirmationCode, body.IMEI, func(event esim.DownloadProgressEvent) {
-		log.Printf("eSIM download %d%% %s", event.Pct, event.Msg)
-	})
+	result, err := a.DownloadESIMProfile(r.Context(), body)
 	if err != nil {
-		writeError(w, http.StatusBadGateway, fmt.Sprintf("下载 Profile 失败: %v", err))
+		writeServiceError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, result)
+	if result.Demo {
+		writeJSON(w, http.StatusOK, map[string]string{"message": result.Message})
+		return
+	}
+	writeJSON(w, http.StatusOK, result.Result)
 }
 
 func decodeJSON(w http.ResponseWriter, r *http.Request, dst any) bool {
