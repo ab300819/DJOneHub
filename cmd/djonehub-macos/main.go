@@ -37,12 +37,7 @@ import (
 //go:embed web/*
 var webAssets embed.FS
 
-type receivedSMS struct {
-	Sender    string    `json:"sender"`
-	Content   string    `json:"content"`
-	Code      string    `json:"code,omitempty"`
-	Timestamp time.Time `json:"timestamp"`
-}
+type receivedSMS = service.ReceivedSMS
 
 type profileNote struct {
 	Label string `json:"label"`
@@ -1118,75 +1113,29 @@ func decodeUSBATPDU(header, pduHex string) (receivedSMS, smscodec.ConcatInfo, er
 }
 
 func (a *app) listSMS(w http.ResponseWriter, _ *http.Request) {
-	a.smsMu.RLock()
-	items := append([]receivedSMS(nil), a.sms...)
-	a.smsMu.RUnlock()
-	if items == nil {
-		items = []receivedSMS{}
-	}
-	writeJSON(w, http.StatusOK, items)
+	writeJSON(w, http.StatusOK, a.ListSMS())
 }
 
 func (a *app) smsStatus(w http.ResponseWriter, _ *http.Request) {
-	a.smsMu.RLock()
-	lastPoll := a.smsLastPoll
-	lastPollError := a.smsLastPollError
-	count := len(a.sms)
-	a.smsMu.RUnlock()
-	writeJSON(w, http.StatusOK, map[string]any{
-		"count":           count,
-		"polling":         !a.demo && a.modem == nil,
-		"poll_interval_s": int(a.smsPollInterval.Seconds()),
-		"auto_cleanup_me": a.smsAutoCleanupME,
-		"last_poll":       lastPoll,
-		"last_poll_error": lastPollError,
-	})
+	writeJSON(w, http.StatusOK, a.SMSStatus())
 }
 
 func (a *app) refreshSMS(w http.ResponseWriter, _ *http.Request) {
-	if a.demo {
-		writeJSON(w, http.StatusAccepted, map[string]bool{"accepted": true})
+	result, err := a.RefreshSMS()
+	if err != nil {
+		writeServiceError(w, err)
 		return
 	}
-	if a.modem == nil {
-		if err := a.pollSMSOnce(); err != nil {
-			writeError(w, http.StatusBadGateway, err.Error())
-			return
-		}
-		a.smsMu.RLock()
-		count := len(a.sms)
-		a.smsMu.RUnlock()
-		writeJSON(w, http.StatusAccepted, map[string]any{"accepted": true, "count": count})
-		return
-	}
-	go a.modem.CheckAllSMS()
-	writeJSON(w, http.StatusAccepted, map[string]bool{"accepted": true})
+	writeJSON(w, http.StatusAccepted, result)
 }
 
 func (a *app) clearModuleSMS(w http.ResponseWriter, _ *http.Request) {
-	if a.demo {
-		writeJSON(w, http.StatusOK, map[string]any{"cleared": true, "before": 0, "after": 0})
-		return
-	}
-	if a.modem != nil {
-		writeError(w, http.StatusServiceUnavailable, "module SMS cleanup is only available through USB AT")
-		return
-	}
-	if err := a.ensureUSBAT(); err != nil {
-		writeError(w, http.StatusServiceUnavailable, "AT serial port is unavailable: "+err.Error())
-		return
-	}
-	before, after, err := a.clearUSBATSMSMemory("ME")
+	result, err := a.ClearModuleSMS()
 	if err != nil {
-		writeError(w, http.StatusBadGateway, err.Error())
+		writeServiceError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"cleared": true,
-		"memory":  "ME",
-		"before":  before,
-		"after":   after,
-	})
+	writeJSON(w, http.StatusOK, result)
 }
 
 func (a *app) runATCommand(command string, timeout time.Duration) (string, error) {
@@ -1232,21 +1181,12 @@ func (a *app) sendSMS(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &body) {
 		return
 	}
-	if strings.TrimSpace(body.Phone) == "" || strings.TrimSpace(body.Message) == "" {
-		writeError(w, http.StatusBadRequest, "phone and message are required")
-		return
-	}
-	if a.demo {
-		a.recordSMS("已发送至 "+body.Phone, body.Message, time.Now())
-		writeJSON(w, http.StatusOK, map[string]any{"sent": true, "segments": 1})
-		return
-	}
-	segments, err := a.sendTextSMS(body.Phone, body.Message)
+	result, err := a.SendSMS(body.Phone, body.Message)
 	if err != nil {
-		writeError(w, http.StatusBadGateway, err.Error())
+		writeServiceError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"sent": true, "segments": segments})
+	writeJSON(w, http.StatusOK, result)
 }
 
 func (a *app) sendTextSMS(phone, message string) (int, error) {
@@ -1314,6 +1254,23 @@ func smsSubmitOptions(message string) smscodec.SubmitOptions {
 	return smscodec.SubmitOptions{}
 }
 
+// writeServiceError maps a service failure onto the status code this API has
+// always used for that kind of failure.
+func writeServiceError(w http.ResponseWriter, err error) {
+	switch service.KindOf(err) {
+	case service.KindInvalid:
+		writeError(w, http.StatusBadRequest, err.Error())
+	case service.KindUnavailable:
+		writeError(w, http.StatusServiceUnavailable, err.Error())
+	case service.KindConflict:
+		writeError(w, http.StatusConflict, err.Error())
+	case service.KindInternal:
+		writeError(w, http.StatusInternalServerError, err.Error())
+	default:
+		writeError(w, http.StatusBadGateway, err.Error())
+	}
+}
+
 func (a *app) executeAT(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Command string `json:"command"`
@@ -1322,14 +1279,11 @@ func (a *app) executeAT(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	response, err := a.ExecuteAT(body.Command)
-	switch {
-	case errors.Is(err, service.ErrInvalidCommand):
-		writeError(w, http.StatusBadRequest, err.Error())
-	case err != nil:
-		writeError(w, http.StatusBadGateway, err.Error())
-	default:
-		writeJSON(w, http.StatusOK, map[string]string{"response": response})
+	if err != nil {
+		writeServiceError(w, err)
+		return
 	}
+	writeJSON(w, http.StatusOK, map[string]string{"response": response})
 }
 
 func (a *app) networkDiagnostic(w http.ResponseWriter, _ *http.Request) {

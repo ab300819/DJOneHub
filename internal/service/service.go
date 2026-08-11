@@ -9,13 +9,56 @@ package service
 
 import (
 	"errors"
+	"fmt"
+	"time"
 
 	"github.com/ab300819/DJOneHub/internal/modem"
 )
 
 // ErrInvalidCommand is returned when a caller passes something that is not an
 // AT command. Transports map it to their own notion of a client-side error.
-var ErrInvalidCommand = errors.New("command must start with AT")
+var ErrInvalidCommand = Fail(KindInvalid, "command must start with AT")
+
+// ErrorKind lets a transport report a failure in its own vocabulary without the
+// service knowing anything about that transport. The HTTP handlers map these to
+// status codes; the stdio bridge passes them through as a field.
+type ErrorKind string
+
+const (
+	// KindInvalid means the caller sent something wrong.
+	KindInvalid ErrorKind = "invalid"
+	// KindUnavailable means the capability is not usable right now.
+	KindUnavailable ErrorKind = "unavailable"
+	// KindUpstream means the module or a lower layer failed.
+	KindUpstream ErrorKind = "upstream"
+	// KindConflict means the request contradicts current state.
+	KindConflict ErrorKind = "conflict"
+	// KindInternal means the core itself failed.
+	KindInternal ErrorKind = "internal"
+)
+
+// Error is a failure carrying the kind a transport needs to classify it.
+type Error struct {
+	Kind    ErrorKind
+	Message string
+}
+
+func (e *Error) Error() string { return e.Message }
+
+// Fail builds a classified error.
+func Fail(kind ErrorKind, format string, args ...any) *Error {
+	return &Error{Kind: kind, Message: fmt.Sprintf(format, args...)}
+}
+
+// KindOf reports how to classify err. Anything unclassified is treated as an
+// upstream failure, which is what the majority of handlers already did.
+func KindOf(err error) ErrorKind {
+	var classified *Error
+	if errors.As(err, &classified) {
+		return classified.Kind
+	}
+	return KindUpstream
+}
 
 // Service is the set of capabilities a transport may expose.
 //
@@ -31,6 +74,56 @@ type Service interface {
 
 	// ExecuteAT sends a raw AT command and returns the module's reply verbatim.
 	ExecuteAT(command string) (string, error)
+
+	// ListSMS returns the messages read so far this session.
+	ListSMS() []ReceivedSMS
+	// SMSStatus reports the polling state behind ListSMS.
+	SMSStatus() SMSStatus
+	// RefreshSMS asks the module for new messages.
+	RefreshSMS() (RefreshResult, error)
+	// ClearModuleSMS erases the module's own ME message store.
+	ClearModuleSMS() (ClearResult, error)
+	// SendSMS sends a text message and reports how many segments it took.
+	SendSMS(phone, message string) (SendResult, error)
+}
+
+// ReceivedSMS is one message read from the module.
+type ReceivedSMS struct {
+	Sender    string    `json:"sender"`
+	Content   string    `json:"content"`
+	Code      string    `json:"code,omitempty"`
+	Timestamp time.Time `json:"timestamp"`
+}
+
+// SMSStatus describes the background polling that feeds ListSMS.
+type SMSStatus struct {
+	Count         int       `json:"count"`
+	Polling       bool      `json:"polling"`
+	PollIntervalS int       `json:"poll_interval_s"`
+	AutoCleanupME bool      `json:"auto_cleanup_me"`
+	LastPoll      time.Time `json:"last_poll"`
+	LastPollError string    `json:"last_poll_error"`
+}
+
+// RefreshResult reports that a refresh was accepted; Count is present only when
+// the refresh completed synchronously.
+type RefreshResult struct {
+	Accepted bool `json:"accepted"`
+	Count    *int `json:"count,omitempty"`
+}
+
+// ClearResult reports the module store sizes around a cleanup.
+type ClearResult struct {
+	Cleared bool   `json:"cleared"`
+	Memory  string `json:"memory,omitempty"`
+	Before  int    `json:"before"`
+	After   int    `json:"after"`
+}
+
+// SendResult reports a successful send.
+type SendResult struct {
+	Sent     bool `json:"sent"`
+	Segments int  `json:"segments"`
 }
 
 // Health mirrors the payload of GET /api/health.
