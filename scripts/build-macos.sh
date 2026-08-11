@@ -8,15 +8,14 @@ mkdir -p "${DIST_DIR}"
 
 cd "${ROOT_DIR}"
 
-ARCH=$(go env GOARCH)
+# Always builds for the host architecture, so the output needs no architecture
+# suffix; release packages carry one, and those come from package-macos.sh.
 PKG_CONFIG_PATH="${PKG_CONFIG_PATH:-/opt/homebrew/lib/pkgconfig:/usr/local/lib/pkgconfig}"
 export PKG_CONFIG_PATH
 
-CGO_ENABLED=1 GOOS=darwin GOARCH="${ARCH}" go build \
+CGO_ENABLED=1 GOOS=darwin go build \
   -p 2 \
   -trimpath -ldflags="-s -w" \
-  -o "${DIST_DIR}/djonehub-macos-${ARCH}" ./cmd/djonehub-macos
+  -o "${DIST_DIR}/djonehub-macos" ./cmd/djonehub-macos
 
-cp "${DIST_DIR}/djonehub-macos-${ARCH}" "${DIST_DIR}/djonehub-macos"
-
-echo "macOS binaries written to ${DIST_DIR}"
+echo "macOS binary written to ${DIST_DIR}/djonehub-macos"
