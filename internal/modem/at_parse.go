@@ -302,17 +302,6 @@ func parseQIMS(resp string) (int, bool) {
 	return 0, false
 }
 
-func parseQNWINFO(resp string) string {
-	mode, duplex := parseQNWInfoModeAndDuplex(resp)
-	if mode == "" {
-		return ""
-	}
-	if duplex != "" {
-		return duplex + " " + mode
-	}
-	return mode
-}
-
 func parseQNWInfoModeAndDuplex(resp string) (string, string) {
 	mode, duplex, _, _ := parseQNWInfoRadio(resp)
 	return mode, duplex
@@ -351,39 +340,6 @@ func parseQNWInfoRadio(resp string) (string, string, string, uint32) {
 		}
 	}
 	return mode, duplex, band, channel
-}
-
-func extractNextLineAfterPrefix(resp string, prefix string) (string, bool) {
-	lines := splitLines(resp)
-	for i := 0; i < len(lines); i++ {
-		if strings.HasPrefix(lines[i], prefix) {
-			if i+1 < len(lines) {
-				next := strings.TrimSpace(lines[i+1])
-				if next != "" && next != "OK" {
-					return next, true
-				}
-			}
-			return "", false
-		}
-	}
-	return "", false
-}
-
-func extractAllNextLinesAfterPrefix(resp string, prefix string) []string {
-	lines := splitLines(resp)
-	out := make([]string, 0)
-	for i := 0; i < len(lines); i++ {
-		if strings.HasPrefix(lines[i], prefix) {
-			if i+1 < len(lines) {
-				next := strings.TrimSpace(lines[i+1])
-				if next != "" && next != "OK" {
-					out = append(out, next)
-				}
-				i++
-			}
-		}
-	}
-	return out
 }
 
 func extractSMSPDUAfterPrefix(resp string, prefix string) (string, bool) {

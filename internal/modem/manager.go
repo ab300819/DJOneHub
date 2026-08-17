@@ -1447,12 +1447,6 @@ func (m *Manager) handleURC(line string) {
 	}
 }
 
-// readAndProcessSMS 读取并处理短信
-func (m *Manager) readAndProcessSMS(index string) {
-	// 公开给外部调用的封装 (如果需要)
-	m.ReadAndProcessSMS(index)
-}
-
 // ReadAndProcessSMS 公开方法：读取并处理短信
 func (m *Manager) ReadAndProcessSMS(index string) {
 	m.readAndProcessSMSFromStorage("", index)
@@ -2023,12 +2017,8 @@ func (m *Manager) SendSMSWithOptions(phone, message string, opts smscodec.Submit
 	return nil
 }
 
-// buildSMSPDUs 构建多段 SMS-SUBMIT PDU
+// buildSMSPDUsWithOptions 构建多段 SMS-SUBMIT PDU
 // 返回: PDU 十六进制字符串列表, TPDU 长度列表 (不含 SMSC), 错误
-func (m *Manager) buildSMSPDUs(phone, message string) ([]string, []int, error) {
-	return m.buildSMSPDUsWithOptions(phone, message, smscodec.SubmitOptions{})
-}
-
 func (m *Manager) buildSMSPDUsWithOptions(phone, message string, opts smscodec.SubmitOptions) ([]string, []int, error) {
 	tpduBytesList, tpduLenList, err := smscodec.BuildSubmitTPDUsWithOptions(phone, message, opts)
 	if err != nil {

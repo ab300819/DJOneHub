@@ -383,8 +383,7 @@ const (
 )
 
 var (
-	switchFallbackPowerTimeout   = 20 * time.Second
-	switchFallbackPowerCycleWait = 500 * time.Millisecond
+	switchFallbackPowerTimeout = 20 * time.Second
 )
 
 // basicProfileTags 过滤掉耗时的 TagProfileIcon 数据（PNG等图片数据），
@@ -409,11 +408,6 @@ func listBasicProfiles(client *lpa.Client) ([]*sgp22.ProfileInfo, error) {
 		return nil, err
 	}
 	return response.ProfileList, nil
-}
-
-type simPowerController interface {
-	UIMPowerOffSIM(ctx context.Context, slot uint8) error
-	UIMPowerOnSIM(ctx context.Context, slot uint8) error
 }
 
 type apduIdleWaiter interface {

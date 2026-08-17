@@ -92,8 +92,6 @@ type usbInterfaceStatus = service.USBInterface
 // the aliases keep the existing call sites in this file unchanged.
 type usbDeviceStatus = service.USBDevice
 
-type networkDiagnostic = service.NetworkDiagnostic
-
 type pdpContext = service.PDPContext
 
 type macNetInterface = service.MacNetInterface
@@ -104,10 +102,6 @@ type networkByteCounters struct {
 	RX uint64
 	TX uint64
 }
-
-type networkTrafficSnapshot = service.TrafficSnapshot
-
-type networkCheckResult = service.NetworkCheckResult
 
 func main() {
 	var port string

@@ -363,7 +363,6 @@ func (q *QMIBackend) GetServingSystem(ctx context.Context) (*ServingSystem, erro
 		err              error
 		fromSnapshot     bool
 		snapshotUpdateAt time.Time
-		operatorRetried  bool
 	)
 	if snap := q.source.GetDeviceSnapshot(); snap != nil {
 		if cached, ts := snap.ServingSystem(); cached != nil {
@@ -430,13 +429,12 @@ func (q *QMIBackend) GetServingSystem(ctx context.Context) (*ServingSystem, erro
 	if serving.MCC > 0 {
 		ss.Operator = qmiOperatorDisplay(serving.MCC, serving.MNC)
 	}
-	if (ss.RegStatus == 1 || ss.RegStatus == 5) && strings.TrimSpace(ss.Operator) == "" && !operatorRetried {
+	if (ss.RegStatus == 1 || ss.RegStatus == 5) && strings.TrimSpace(ss.Operator) == "" {
 		logger.Debug("QMI serving 命中已注册但运营商为空，触发一次回源",
 			"reg_status", ss.RegStatus,
 			"mcc", ss.MCC,
 			"mnc", ss.MNC,
 			"rat", serving.RadioInterface)
-		operatorRetried = true
 		if live, liveErr := q.source.GetServingSystem(ctx); liveErr == nil && live != nil {
 			serving = live
 			ss.MCC = serving.MCC
