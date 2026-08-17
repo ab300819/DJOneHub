@@ -5,6 +5,9 @@ let esimHealthInFlight = false;
 let networkTrafficTimer = null;
 let networkTrafficPrevious = null;
 let networkTrafficInFlight = false;
+let networkActivityTimer = null;
+let networkActivityInFlight = false;
+let networkActivityCountdown = 5;
 
 function setThemePreference(theme) {
   if (theme === "light" || theme === "dark") {
@@ -146,14 +149,14 @@ async function copySMSCode(code) {
 function renderHardwareDetails(status) {
   const panel = $("#hardware-details");
   const device = status.usb_device;
-  if (!device && !status.discovery_error) {
+  if (!device) {
     panel.hidden = true;
     panel.replaceChildren();
     return;
   }
 
   const title = document.createElement("strong");
-  title.textContent = device ? "已检测到大疆 USB 设备" : "未检测到可用硬件";
+  title.textContent = device ? "已检测到兼容 USB 设备" : "未检测到可用硬件";
 
   const detail = document.createElement("p");
   if (device) {
@@ -161,7 +164,7 @@ function renderHardwareDetails(status) {
       ? `${device.interfaces.length} 个 USB interface`
       : "interface 未知";
     detail.textContent = [
-      `${device.vendor || "DJI"} ${device.product || ""}`.trim(),
+      `${device.vendor || "兼容设备"} ${device.product || ""}`.trim(),
       `${device.vendor_id}:${device.product_id}`,
       device.mode,
       interfaceText,
@@ -177,6 +180,15 @@ function renderHardwareDetails(status) {
 
   panel.hidden = false;
   panel.replaceChildren(title, detail, hint);
+}
+
+function setSidebarDeviceState(connected, device = null) {
+  const panel = $("#sidebar-device");
+  panel.classList.toggle("is-offline", !connected);
+  $("#sidebar-device-name").textContent = connected
+    ? (device?.product || "4G 模块")
+    : "等待设备";
+  $("#sidebar-device-state").textContent = connected ? "USB" : "未连接";
 }
 
 function setValue(id, text, tone = "") {
@@ -196,11 +208,51 @@ function displayWorkMode(value) {
 	  return { label: "待读取", tone: "muted" };
 	}
   switch (Number(value)) {
-    case 0: return { label: "短信模式", tone: "info" };
-    case 1: return { label: "上网模式", tone: "info" };
+    case 0: return { label: "短信模式", tone: "neutral" };
+    case 1: return { label: "上网模式", tone: "neutral" };
     case 2: return { label: "实验模式 2", tone: "warn" };
     case 3: return { label: "实验模式 3", tone: "warn" };
     default: return { label: "待读取", tone: "muted" };
+  }
+}
+
+function setWorkModeControl(value) {
+  const currentMode = value === null || value === undefined || value === "" ? -1 : Number(value);
+  const smsButton = $("#workmode-sms");
+  const networkButton = $("#workmode-network");
+  smsButton.setAttribute("aria-pressed", currentMode === 0 ? "true" : "false");
+  networkButton.setAttribute("aria-pressed", currentMode === 1 ? "true" : "false");
+}
+
+function setUSBNetModeSelector(value) {
+  const currentMode = value === null || value === undefined || value === "" ? -1 : Number(value);
+  [0, 1, 2, 3].forEach((mode) => {
+    $("#usbnet-mode-" + mode).setAttribute("aria-pressed", currentMode === mode ? "true" : "false");
+  });
+}
+
+function setHeaderDeviceState(connected, label = "设备在线") {
+  const indicator = $("#header-device-state");
+  indicator.classList.toggle("is-online", connected);
+  indicator.classList.toggle("is-offline", !connected);
+  indicator.querySelector("span").textContent = label;
+}
+
+async function loadSidebarConnection() {
+  const panel = $("#sidebar-connection");
+  try {
+    const connection = await api("/api/network/local");
+    if (!connection?.interface) {
+      panel.hidden = true;
+      return;
+    }
+    $("#sidebar-connection-detail").textContent = [connection.interface, connection.ipv4].filter(Boolean).join(" · ");
+    const state = $("#sidebar-connection-state");
+    state.textContent = connection.is_default ? "默认出口" : "已连接";
+    state.classList.toggle("is-secondary", !connection.is_default);
+    panel.hidden = false;
+  } catch (_) {
+    panel.hidden = true;
   }
 }
 
@@ -217,9 +269,12 @@ function signalTone(dbm) {
 async function loadStatus() {
   try {
     const status = await api("/api/status");
-    setValue("#operator", displayOperatorName(status.operator), status.operator ? "info" : "muted");
+    const connected = Boolean(status.usb_device || status.imei || status.firmware);
+    setHeaderDeviceState(connected, connected ? "设备在线" : "等待设备");
+    setSidebarDeviceState(connected, status.usb_device);
+    setValue("#operator", displayOperatorName(status.operator), status.operator ? "neutral" : "muted");
     setValue("#signal", status.signal_dbm ? `${status.signal_dbm} dBm` : "--", signalTone(status.signal_dbm));
-    setValue("#network-mode", status.network_mode || status.reg_status_text || "--", status.network_mode ? "info" : "muted");
+    setValue("#network-mode", status.network_mode || status.reg_status_text || "--", status.network_mode ? "neutral" : "muted");
     setValue(
       "#sim",
       status.sim_inserted ? "已插入" : (status.usb_device ? "待读取" : "未检测到"),
@@ -229,11 +284,17 @@ async function loadStatus() {
       ? displayWorkMode(status.usbnet_mode)
       : displayWorkMode(null);
     setValue("#work-mode", workMode.label, workMode.tone);
-    $("#device-summary").textContent =
-      status.hardware_status || [status.imei, status.firmware].filter(Boolean).join(" · ") || "模块初始化中";
+    setWorkModeControl(status.usbnet_mode);
+    setUSBNetModeSelector(status.usbnet_mode);
+    $("#device-summary").textContent = connected
+      ? (status.hardware_status || [status.imei, status.firmware].filter(Boolean).join(" · ") || "模块初始化中")
+      : "等待连接 4G 模块";
     renderHardwareDetails(status);
   } catch (error) {
     $("#device-summary").textContent = error.message;
+    setHeaderDeviceState(false, "设备离线");
+    setSidebarDeviceState(false);
+    setWorkModeControl(null);
   }
 }
 
@@ -338,7 +399,7 @@ async function copyIdentifier(value, label) {
 async function editProfileNote(profile, note) {
   const values = await showModal({
     title: "编辑模块资料",
-    message: "这些资料保存在大疆模块中，并按 ICCID 与当前 Profile 关联。",
+    message: "这些资料保存在兼容模块中，并按 ICCID 与当前 Profile 关联。",
     confirmLabel: "保存",
     fields: [
       { name: "label", label: "模块内名称", value: note.label || "", placeholder: "可选" },
@@ -515,6 +576,29 @@ function diagnosticCard(label, value, detail = "") {
   return card;
 }
 
+function networkPathStep(label, value, detail = "", tone = "") {
+  const step = document.createElement("div");
+  step.className = `network-path-step ${tone}`.trim();
+  const labelNode = document.createElement("span");
+  labelNode.textContent = label;
+  const valueNode = document.createElement("strong");
+  valueNode.textContent = value || "--";
+  const detailNode = document.createElement("small");
+  detailNode.textContent = detail;
+  step.append(labelNode, valueNode, detailNode);
+  return step;
+}
+
+function networkFact(label, value) {
+  const item = document.createElement("div");
+  const term = document.createElement("dt");
+  term.textContent = label;
+  const description = document.createElement("dd");
+  description.textContent = value || "--";
+  item.append(term, description);
+  return item;
+}
+
 function renderNetworkCheck(label, result) {
   const list = $("#network-checks");
   list.className = "list";
@@ -552,6 +636,7 @@ async function loadNetwork() {
   $("#network-status").textContent = "正在读取网络诊断...";
   try {
     const diag = await api("/api/network");
+    setUSBNetModeSelector(diag.usbnet_mode);
     const active = Array.isArray(diag.active_contexts) ? diag.active_contexts.join(", ") : "";
     const apns = Array.isArray(diag.pdp_contexts)
       ? diag.pdp_contexts.map((ctx) => `${ctx.id}:${ctx.apn}`).join(" · ")
@@ -561,18 +646,23 @@ async function loadNetwork() {
       ? `${diag.usb_device.vendor || ""} ${diag.usb_device.product || ""} (${diag.usb_device.vendor_id}:${diag.usb_device.product_id})`
       : "未检测到";
     const route = diag.default_route || {};
-    const routeText = route.interface
-      ? `${route.interface}${route.gateway ? ` -> ${route.gateway}` : ""}`
-      : "未知";
-    grid.replaceChildren(
-      diagnosticCard("USB 网卡", diag.usb_network_present ? "已识别" : "未识别", "macOS 是否出现可用 USB 网络接口"),
-      diagnosticCard("默认出口", routeText, "当前 macOS 实际优先使用的网卡和网关"),
-      diagnosticCard("usbnet", diag.usbnet_mode || "未知", "模块当前 USB 网络模式"),
-      diagnosticCard("蜂窝数据", active ? `已激活 ${active}` : "未激活", "PDP context 激活状态"),
-      diagnosticCard("蜂窝 IP", addresses || "无", "模块侧拿到的数据网络地址"),
-      diagnosticCard("APN", apns || "无", "当前可见 PDP 配置"),
-      diagnosticCard("USB 枚举", usb, diag.usb_device?.mode || ""),
+    const routeText = route.interface || "未知";
+    const path = document.createElement("div");
+    path.className = "network-path";
+    path.append(
+      networkPathStep("蜂窝数据", active ? `已激活 ${active}` : "未激活", addresses || "等待分配蜂窝 IP", active ? "is-good" : "is-warn"),
+      networkPathStep("USB 网卡", diag.usb_network_present ? "已识别" : "未识别", "macOS 网络接口", diag.usb_network_present ? "is-good" : "is-bad"),
+      networkPathStep("默认出口", routeText, route.gateway ? `网关 ${route.gateway}` : "macOS 当前默认路由", route.interface ? "is-good" : "is-warn"),
     );
+    const facts = document.createElement("dl");
+    facts.className = "network-facts";
+    facts.append(
+      networkFact("USBNET", diag.usbnet_mode ?? "未知"),
+      networkFact("APN", apns || "无"),
+      networkFact("USB 设备", usb),
+    );
+    grid.className = "network-summary";
+    grid.replaceChildren(path, facts);
 
     const errorText = diag.errors ? ` · 错误：${Object.values(diag.errors).join("；")}` : "";
     $("#network-status").textContent = diag.usb_network_present
@@ -600,7 +690,8 @@ async function loadNetwork() {
     }));
   } catch (error) {
     $("#network-status").textContent = `读取网络诊断失败：${error.message}`;
-    grid.replaceChildren();
+    grid.className = "network-summary network-summary-empty";
+    grid.textContent = "网络摘要暂不可用";
     ifaceList.className = "list empty";
     ifaceList.textContent = "读取失败";
     notice(error.message);
@@ -650,7 +741,7 @@ async function loadNetworkTraffic() {
     setValue("#traffic-tx-rate", `${formatTrafficBytes(txRate)}/s`, "neutral");
     setValue("#traffic-session-rx", formatTrafficBytes(sample.session_rx_bytes), "neutral");
     setValue("#traffic-session-tx", formatTrafficBytes(sample.session_tx_bytes), "neutral");
-    setValue("#traffic-session-total", formatTrafficBytes(sample.session_total_bytes), "emphasis");
+    setValue("#traffic-session-total", formatTrafficBytes(sample.session_total_bytes), "neutral");
     $("#traffic-session-total").title = "本次启动期间的下载与上传流量之和；关闭 DJOneHub 后清零";
   } catch (error) {
     setValue("#traffic-rx-rate", "--", "muted");
@@ -670,6 +761,101 @@ function setNetworkTrafficPolling(enabled) {
   }
   void loadNetworkTraffic();
   networkTrafficTimer = setInterval(loadNetworkTraffic, 1000);
+}
+
+function activityInitials(value) {
+  return String(value || "?").trim().slice(0, 2).toUpperCase();
+}
+
+function renderNetworkActivityCountdown() {
+  const label = $("#activity-updated");
+  if (!label) return;
+  label.textContent = networkActivityInFlight
+    ? "正在刷新…"
+    : `${networkActivityCountdown} 秒后刷新`;
+}
+
+async function loadNetworkActivity() {
+  if (networkActivityInFlight) return;
+  networkActivityInFlight = true;
+  renderNetworkActivityCountdown();
+  const list = $("#activity-list");
+  try {
+    const snapshot = await api("/api/network/activity");
+    if (!snapshot.available) {
+      $("#activity-physical").textContent = "未检测到 4G 网卡";
+      $("#activity-tunnel").textContent = "--";
+      $("#activity-count").textContent = "0 个连接";
+      list.className = "activity-list empty";
+      list.textContent = "当前没有可展示的 4G 联网活动";
+      return;
+    }
+    $("#activity-physical").textContent = `${snapshot.physical_interface}${snapshot.physical_ipv4 ? ` · ${snapshot.physical_ipv4}` : ""}${snapshot.physical_active ? " · 活跃" : ""}`;
+    $("#activity-tunnel").textContent = snapshot.tunnel_interface || "直连";
+    const connections = Array.isArray(snapshot.connections) ? snapshot.connections : [];
+    $("#activity-count").textContent = `${connections.length} 个连接`;
+    if (!connections.length) {
+      list.className = "activity-list empty";
+      list.textContent = "当前没有活跃的应用连接";
+      return;
+    }
+    list.className = "activity-list";
+    list.replaceChildren(...connections.map((connection) => {
+      const row = document.createElement("article");
+      row.className = "activity-row";
+      const app = document.createElement("div");
+      app.className = "activity-app";
+      const glyph = document.createElement("i");
+      glyph.textContent = activityInitials(connection.process);
+      const process = document.createElement("strong");
+      process.textContent = connection.process || "系统";
+      app.append(glyph, process);
+      const target = document.createElement("div");
+      target.className = "activity-target";
+      const host = document.createElement("strong");
+      host.textContent = connection.host || connection.ip;
+      const detail = document.createElement("small");
+      detail.textContent = connection.ip
+        ? `${connection.ip}${connection.port ? `:${connection.port}` : ""}`
+        : (connection.port ? `端口 ${connection.port}` : "目标主机");
+      target.append(host, detail);
+      const protocol = document.createElement("span");
+      protocol.className = "activity-protocol";
+      protocol.textContent = connection.protocol || "IP";
+      const bytes = document.createElement("span");
+      bytes.className = "activity-bytes";
+      bytes.textContent = `↓ ${formatTrafficBytes(connection.rx_bytes)} · ↑ ${formatTrafficBytes(connection.tx_bytes)}`;
+      row.append(app, target, protocol, bytes);
+      return row;
+    }));
+  } catch (error) {
+    list.className = "activity-list empty";
+    list.textContent = `联网活动读取失败：${error.message}`;
+  } finally {
+    networkActivityInFlight = false;
+    networkActivityCountdown = 5;
+    renderNetworkActivityCountdown();
+  }
+}
+
+function setNetworkActivityPolling(enabled) {
+  clearInterval(networkActivityTimer);
+  networkActivityTimer = null;
+  if (!enabled) return;
+  networkActivityCountdown = 5;
+  void loadNetworkActivity();
+  networkActivityTimer = setInterval(() => {
+    if (networkActivityInFlight) {
+      renderNetworkActivityCountdown();
+      return;
+    }
+    networkActivityCountdown -= 1;
+    if (networkActivityCountdown <= 0) {
+      void loadNetworkActivity();
+      return;
+    }
+    renderNetworkActivityCountdown();
+  }, 1000);
 }
 
 async function setUSBNetMode(mode) {
@@ -693,6 +879,10 @@ async function setUSBNetMode(mode) {
 }
 
 async function switchWorkMode(mode, label, button) {
+  if (button.getAttribute("aria-pressed") === "true") {
+    notice(`当前已是${label}`);
+    return;
+  }
   const confirmed = await showModal({
     title: `切换到${label}`,
     message: `将写入 usbnet=${mode} 并重启模块，USB 会短暂断开。`,
@@ -974,12 +1164,25 @@ async function loadESIM() {
 
 document.querySelectorAll(".tab").forEach((tab) => {
   tab.addEventListener("click", () => {
-    document.querySelectorAll(".tab, .view").forEach((el) => el.classList.remove("active"));
+    document.querySelectorAll(".tab").forEach((item) => {
+      item.classList.remove("active");
+      item.removeAttribute("aria-current");
+    });
+    document.querySelectorAll(".view").forEach((view) => view.classList.remove("active"));
     tab.classList.add("active");
+    tab.setAttribute("aria-current", "page");
     $(`#${tab.dataset.view}`).classList.add("active");
+    setNetworkActivityPolling(tab.dataset.view === "overview");
     if (tab.dataset.view === "esim") loadESIM();
     else setESIMHealthPolling(false);
     if (tab.dataset.view === "network") loadNetwork();
+    if (tab.dataset.view === "at") {
+      requestAnimationFrame(() => {
+        const input = $("#at-command");
+        input.focus();
+        input.setSelectionRange(input.value.length, input.value.length);
+      });
+    }
   });
 });
 
@@ -1006,6 +1209,14 @@ $("#esim-download-form").addEventListener("submit", async (event) => {
   } catch (error) { status.textContent = `下载失败：${error.message}`; notice(error.message); } finally { button.disabled = false; }
 });
 
+const messageInput = $("#message");
+const messageCounter = $("#message-counter");
+const updateMessageCounter = () => {
+  messageCounter.textContent = `${messageInput.value.length} 字 · 自动分片`;
+};
+messageInput.addEventListener("input", updateMessageCounter);
+updateMessageCounter();
+
 $("#send-form").addEventListener("submit", async (event) => {
   event.preventDefault();
   const button = event.submitter;
@@ -1017,7 +1228,8 @@ $("#send-form").addEventListener("submit", async (event) => {
       method: "POST",
       body: JSON.stringify({ phone: $("#phone").value, message: $("#message").value }),
     });
-    $("#message").value = "";
+    messageInput.value = "";
+    updateMessageCounter();
     const segments = Number(result.segments || 1);
     notice(segments > 1 ? `短信已发送（${segments} 个分片）` : "短信已发送");
   } catch (error) {
@@ -1031,20 +1243,29 @@ $("#send-form").addEventListener("submit", async (event) => {
 $("#at-form").addEventListener("submit", async (event) => {
   event.preventDefault();
   const output = $("#at-output");
-  output.textContent = "执行中";
+  const input = $("#at-command");
+  const command = input.value.trim();
+  if (!command) {
+    input.value = "";
+    input.focus();
+    return;
+  }
+  output.textContent = `› ${command}\n\n执行中...`;
+  input.value = "";
+  input.focus();
   try {
     const result = await api("/api/at", {
       method: "POST",
-      body: JSON.stringify({ command: $("#at-command").value }),
+      body: JSON.stringify({ command }),
     });
-    output.textContent = result.response || "OK";
+    output.textContent = `› ${command}\n\n${result.response || "OK"}`;
   } catch (error) {
-    output.textContent = error.message;
+    output.textContent = `› ${command}\n\n${error.message}`;
   }
 });
 
 $("#refresh").addEventListener("click", async () => {
-  await Promise.all([loadStatus(), loadSMS()]);
+  await Promise.all([loadStatus(), loadSMS(), loadSidebarConnection()]);
   notice("状态已刷新");
 });
 $("#refresh-sms").addEventListener("click", async () => {
@@ -1105,6 +1326,9 @@ $("#reboot-module").addEventListener("click", rebootModule);
 
 loadStatus();
 loadSMS();
+loadSidebarConnection();
 setNetworkTrafficPolling(true);
+setNetworkActivityPolling(true);
 setInterval(loadStatus, 10000);
 setInterval(loadSMS, 5000);
+setInterval(loadSidebarConnection, 10000);
