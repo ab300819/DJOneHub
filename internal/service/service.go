@@ -92,6 +92,10 @@ type Service interface {
 	NetworkDiagnostic() (NetworkDiagnostic, error)
 	// NetworkTraffic samples the module network interface's byte counters.
 	NetworkTraffic() TrafficSnapshot
+	// LocalNetworkConnection reports the module interface the host has up, or nil.
+	LocalNetworkConnection() *LocalConnection
+	// NetworkActivity samples the live connections riding the module's path.
+	NetworkActivity() ActivitySnapshot
 	// Check4GRoute reports whether the host currently routes through the module.
 	Check4GRoute() NetworkCheckResult
 	// CheckProxyRoute reports whether the configured local proxy reaches the internet.
@@ -294,6 +298,41 @@ type TrafficSnapshot struct {
 	SessionTotal uint64 `json:"session_total_bytes"`
 	SampledAtMS  int64  `json:"sampled_at_ms"`
 	Error        string `json:"error,omitempty"`
+}
+
+// LocalConnection is the module network interface the host currently has up.
+type LocalConnection struct {
+	Interface string `json:"interface"`
+	IPv4      string `json:"ipv4"`
+	IsDefault bool   `json:"is_default"`
+}
+
+// ActivitySnapshot is one sample of the connections riding the module's path.
+//
+// Connections is capped and sorted by byte volume: the host sampler reports
+// every process on the interface, which is more than the module's own traffic.
+type ActivitySnapshot struct {
+	Available         bool             `json:"available"`
+	PhysicalInterface string           `json:"physical_interface,omitempty"`
+	PhysicalIPv4      string           `json:"physical_ipv4,omitempty"`
+	TunnelInterface   string           `json:"tunnel_interface,omitempty"`
+	PhysicalActive    bool             `json:"physical_active"`
+	SampledAtMS       int64            `json:"sampled_at_ms"`
+	Connections       []ActivityRecord `json:"connections"`
+}
+
+// ActivityRecord is one process's flow to a remote host. Host and IP are
+// exclusive: whichever form the sampler reported is the one that is set.
+type ActivityRecord struct {
+	Process   string `json:"process"`
+	Host      string `json:"host,omitempty"`
+	IP        string `json:"ip"`
+	Port      string `json:"port,omitempty"`
+	Protocol  string `json:"protocol"`
+	Interface string `json:"interface"`
+	State     string `json:"state,omitempty"`
+	RXBytes   uint64 `json:"rx_bytes"`
+	TXBytes   uint64 `json:"tx_bytes"`
 }
 
 // USBNetResult reports an accepted USB composition change.

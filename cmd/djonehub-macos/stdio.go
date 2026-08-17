@@ -158,6 +158,12 @@ func dispatchStdio(svc service.Service, request stdioRequest) stdioResponse {
 	case "network.traffic":
 		return ok(svc.NetworkTraffic())
 
+	case "network.local":
+		return ok(svc.LocalNetworkConnection())
+
+	case "network.activity":
+		return ok(svc.NetworkActivity())
+
 	case "network.check4g":
 		return ok(svc.Check4GRoute())
 

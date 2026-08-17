@@ -7,6 +7,8 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"os/exec"
+	"sort"
 	"strings"
 	"time"
 
@@ -262,6 +264,97 @@ func (a *app) NetworkTraffic() service.TrafficSnapshot {
 	snapshot.RXBytes = current.RX
 	snapshot.TXBytes = current.TX
 	snapshot.SessionRX, snapshot.SessionTX, snapshot.SessionTotal = sessionTrafficFromCounters(current, baseline)
+	return snapshot
+}
+
+// maxActivityConnections caps what NetworkActivity returns. The host sampler
+// reports every process on the interface rather than only the module's own
+// traffic, so the snapshot keeps the heaviest flows and drops the tail.
+const maxActivityConnections = 8
+
+func (a *app) LocalNetworkConnection() *service.LocalConnection {
+	if discoverDJIUSBDevice() == nil {
+		return nil
+	}
+	interfaces := discoverMacNetworkInterfaces()
+	route := discoverMacDefaultRoute()
+	name := selectUSBTrafficInterface(interfaces, route)
+	if name == "" {
+		return nil
+	}
+	for _, item := range interfaces {
+		if item.Name == name {
+			return &service.LocalConnection{
+				Interface: name,
+				IPv4:      item.IPv4,
+				IsDefault: name == route.Interface,
+			}
+		}
+	}
+	return nil
+}
+
+func (a *app) NetworkActivity() service.ActivitySnapshot {
+	snapshot := service.ActivitySnapshot{SampledAtMS: time.Now().UnixMilli()}
+	if discoverDJIUSBDevice() == nil {
+		return snapshot
+	}
+	interfaces := discoverMacNetworkInterfaces()
+	route := discoverMacDefaultRoute()
+	physical := selectUSBTrafficInterface(interfaces, route)
+	if physical == "" {
+		return snapshot
+	}
+	snapshot.Available = true
+	snapshot.PhysicalInterface = physical
+	for _, item := range interfaces {
+		if item.Name == physical {
+			snapshot.PhysicalIPv4 = item.IPv4
+			break
+		}
+	}
+	// With a tunnel up the flows are reported on the tunnel rather than on the
+	// module's own interface, so that is where the connections are read from.
+	tunnel := route.Interface
+	if tunnel == "" {
+		tunnel = physical
+	}
+	snapshot.TunnelInterface = tunnel
+
+	// tcp and udp need separate nettop runs; sample them concurrently so the
+	// two halves describe the same moment.
+	results := make(chan []service.ActivityRecord, 2)
+	for _, mode := range []string{"tcp", "udp"} {
+		go func(mode string) {
+			out, err := exec.Command("nettop", "-L", "1", "-x", "-m", mode, "-t", "wired").Output()
+			if err != nil {
+				results <- nil
+				return
+			}
+			results <- parseNettopActivity(string(out))
+		}(mode)
+	}
+	var sampled []service.ActivityRecord
+	for range 2 {
+		sampled = append(sampled, <-results...)
+	}
+
+	for _, item := range sampled {
+		if item.Interface == physical {
+			snapshot.PhysicalActive = true
+		}
+		if item.Interface == tunnel {
+			snapshot.Connections = append(snapshot.Connections, item)
+		}
+	}
+	sort.Slice(snapshot.Connections, func(i, j int) bool {
+		left := snapshot.Connections[i].RXBytes + snapshot.Connections[i].TXBytes
+		right := snapshot.Connections[j].RXBytes + snapshot.Connections[j].TXBytes
+		return left > right
+	})
+	if len(snapshot.Connections) > maxActivityConnections {
+		snapshot.Connections = snapshot.Connections[:maxActivityConnections]
+	}
 	return snapshot
 }
 

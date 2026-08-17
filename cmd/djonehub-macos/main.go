@@ -4,6 +4,7 @@ import (
 	"context"
 	"embed"
 	"encoding/base64"
+	"encoding/csv"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -11,6 +12,7 @@ import (
 	"fmt"
 	"io/fs"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -679,6 +681,8 @@ func (a *app) routes() http.Handler {
 	mux.HandleFunc("POST /api/at", a.executeAT)
 	mux.HandleFunc("GET /api/network", a.networkDiagnostic)
 	mux.HandleFunc("GET /api/network/traffic", a.networkTraffic)
+	mux.HandleFunc("GET /api/network/local", a.localNetworkConnection)
+	mux.HandleFunc("GET /api/network/activity", a.networkActivity)
 	mux.HandleFunc("POST /api/network/check-4g", a.check4GRoute)
 	mux.HandleFunc("POST /api/network/check-proxy", a.checkProxyRoute)
 	mux.HandleFunc("POST /api/network/usbnet", a.setUSBNetMode)
@@ -1243,6 +1247,14 @@ func (a *app) networkTraffic(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, a.NetworkTraffic())
 }
 
+func (a *app) localNetworkConnection(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, a.LocalNetworkConnection())
+}
+
+func (a *app) networkActivity(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, a.NetworkActivity())
+}
+
 func sessionTrafficFromCounters(current, baseline networkByteCounters) (rx, tx, total uint64) {
 	rx = current.RX - baseline.RX
 	tx = current.TX - baseline.TX
@@ -1443,6 +1455,82 @@ func selectUSBTrafficInterface(interfaces []macNetInterface, route macDefaultRou
 		}
 	}
 	return ""
+}
+
+// nettopProcessSuffix strips the pid that nettop appends to a process name.
+var nettopProcessSuffix = regexp.MustCompile(`\.\d+$`)
+
+// parseNettopActivity reads `nettop -x` CSV. Rows without a flow name a process
+// and apply to the flow rows that follow, so the current process is carried
+// forward across iterations.
+func parseNettopActivity(out string) []service.ActivityRecord {
+	reader := csv.NewReader(strings.NewReader(out))
+	reader.FieldsPerRecord = -1
+	var records []service.ActivityRecord
+	process := "系统"
+	for {
+		row, err := reader.Read()
+		if err != nil {
+			break
+		}
+		if len(row) < 6 || row[1] == "" {
+			continue
+		}
+		description := strings.TrimSpace(row[1])
+		iface := strings.TrimSpace(row[2])
+		if !strings.Contains(description, "<->") {
+			process = nettopProcessSuffix.ReplaceAllString(description, "")
+			continue
+		}
+		protocol, host, port := parseNettopFlow(description)
+		if host == "" || iface == "" || host == "127.0.0.1" || host == "::1" {
+			continue
+		}
+		rx, _ := strconv.ParseUint(strings.TrimSpace(row[4]), 10, 64)
+		tx, _ := strconv.ParseUint(strings.TrimSpace(row[5]), 10, 64)
+		state := ""
+		if strings.HasPrefix(protocol, "tcp") && len(row) > 3 {
+			state = strings.TrimSpace(row[3])
+		}
+		record := service.ActivityRecord{
+			Process: process, Port: port, Protocol: protocol,
+			Interface: iface, State: state, RXBytes: rx, TXBytes: tx,
+		}
+		if net.ParseIP(host) == nil {
+			record.Host = host
+		} else {
+			record.IP = host
+		}
+		records = append(records, record)
+	}
+	return records
+}
+
+// parseNettopFlow splits a "proto local<->remote" description, returning the
+// remote end. IPv6 addresses carry colons of their own, so the port is split on
+// the last dot for those and on the last colon otherwise.
+func parseNettopFlow(description string) (protocol, host, port string) {
+	fields := strings.Fields(description)
+	if len(fields) < 2 {
+		return "", "", ""
+	}
+	protocol = fields[0]
+	flow := fields[len(fields)-1]
+	parts := strings.SplitN(flow, "<->", 2)
+	if len(parts) != 2 {
+		return protocol, "", ""
+	}
+	remote := parts[1]
+	if strings.Count(remote, ":") > 1 {
+		if index := strings.LastIndex(remote, "."); index > 0 {
+			return protocol, strings.Trim(remote[:index], "[]"), remote[index+1:]
+		}
+		return protocol, strings.Trim(remote, "[]"), ""
+	}
+	if index := strings.LastIndex(remote, ":"); index > 0 {
+		return protocol, strings.Trim(remote[:index], "[]"), remote[index+1:]
+	}
+	return protocol, strings.Trim(remote, "[]"), ""
 }
 
 func discoverMacInterfaceCounters() (map[string]networkByteCounters, error) {
