@@ -1,0 +1,44 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release-macos-arm64:
+    # Same constraint as CI: cgo against libusb and the ioreg USB probe mean the
+    # release package can only be produced on a macOS runner.
+    runs-on: macos-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # package-macos.sh builds its own libusb from source; the brew copy is
+      # here for `make test`, which links against the host one.
+      - name: Install libusb
+        run: brew install libusb pkg-config
+
+      - name: Test
+        run: make test
+
+      - name: Build release package
+        run: make release VERSION="${GITHUB_REF_NAME}" ARCH=arm64
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="${GITHUB_REF_NAME}"
+          gh release create "${version}" \
+            "dist/release/DJOneHub-macOS-arm64-${version}.zip" \
+            "dist/release/DJOneHub-macOS-arm64-${version}.zip.sha256" \
+            --generate-notes \
+            --title "DJOneHub ${version}"
