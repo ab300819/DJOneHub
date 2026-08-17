@@ -50,7 +50,7 @@ tidy: ## 整理 go.mod / go.sum
 	$(GO) mod tidy
 
 .PHONY: check
-check: fmt-check vet test ## 提交前的完整检查
+check: fmt-check vet lint test ## 提交前的完整检查
 
 .PHONY: clean
 clean: ## 清理构建产物

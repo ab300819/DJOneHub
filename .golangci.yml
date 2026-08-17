@@ -1,0 +1,14 @@
+version: "2"
+
+# Deliberately narrow. The full default set reports ~49 findings on this tree,
+# and a gate that starts red is a gate nobody fixes. These two catch the class
+# of problem that actually bit us: leftovers from a refactor that still compile.
+#
+# errcheck is the obvious next candidate — 17 of its findings are unchecked
+# writes and AT commands against the modem, which fail silently today. Enable it
+# once those have been triaged.
+linters:
+  default: none
+  enable:
+    - ineffassign
+    - unused

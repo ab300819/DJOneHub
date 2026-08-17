@@ -26,11 +26,20 @@ jobs:
       - name: Install libusb
         run: brew install libusb pkg-config
 
+      # Unpinned on purpose, to match what `make lint` uses locally. A new
+      # golangci-lint release can therefore surface new findings; pin it here if
+      # that ever turns into a surprise red build.
+      - name: Install golangci-lint
+        run: brew install golangci-lint
+
       - name: Check formatting
         run: make fmt-check
 
       - name: Vet
         run: make vet
+
+      - name: Lint
+        run: make lint
 
       - name: Test
         run: make test
