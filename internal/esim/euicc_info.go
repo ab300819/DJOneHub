@@ -68,8 +68,11 @@ func applyEUICCInfoTLV(euicc *EUICCInfo, source string, tlv *bertlv.TLV) {
 			data[0] = 0x30
 			if err := resource.UnmarshalBinary(data); err == nil {
 				if freeNvEntry := resource.First(bertlv.ContextSpecific.Primitive(2)); freeNvEntry != nil {
-					primitive.UnmarshalInt(&euicc.FreeNvramBytes).UnmarshalBinary(freeNvEntry.Value)
-					euicc.FreeNvram = formatBytes(int64(euicc.FreeNvramBytes))
+					if err := primitive.UnmarshalInt(&euicc.FreeNvramBytes).UnmarshalBinary(freeNvEntry.Value); err != nil {
+						logger.Debug("解析 freeNvram 失败", "err", err)
+					} else {
+						euicc.FreeNvram = formatBytes(int64(euicc.FreeNvramBytes))
+					}
 				}
 			} else {
 				logger.Debug("解析 extResource 失败", "err", err)

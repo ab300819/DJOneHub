@@ -353,8 +353,15 @@ func (r *wbxmlReader) parseElement() (*OmaCPCharacteristic, error) {
 			}
 			if peek == wbxmlOpaque {
 				r.pos++
-				length, _ := r.readMBUint32()
-				r.readBytes(int(length)) // 跳过 opaque 数据
+				length, err := r.readMBUint32()
+				if err != nil {
+					return nil, fmt.Errorf("WBXML: opaque 长度读取失败: %w", err)
+				}
+				// 跳不过去就不能继续：readBytes 失败不推进 pos，
+				// 后续会把 opaque 载荷当成 token 解析。
+				if _, err := r.readBytes(int(length)); err != nil {
+					return nil, fmt.Errorf("WBXML: 跳过 opaque 数据失败: %w", err)
+				}
 				continue
 			}
 			if peek == wbxmlSwitchPage {
@@ -481,8 +488,14 @@ func (r *wbxmlReader) parseAttributes(attrs map[string]string) {
 
 		// OPAQUE data → 跳过
 		if b == wbxmlOpaque {
-			length, _ := r.readMBUint32()
-			r.readBytes(int(length))
+			length, err := r.readMBUint32()
+			if err != nil {
+				break
+			}
+			// 同 parseElement：跳不过去就停，避免在错位的数据上继续。
+			if _, err := r.readBytes(int(length)); err != nil {
+				break
+			}
 			continue
 		}
 
