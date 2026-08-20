@@ -471,3 +471,91 @@ func TestManagerExecuteATReturnsResponseWhenRunning(t *testing.T) {
 		t.Fatalf("ExecuteAT() resp = %q, want %q", resp, "OK")
 	}
 }
+
+// nthWriteFailSerialPort 让第 failOn 次写入失败，用于覆盖"命令写成功、收到 '>'
+// 之后写正文才失败"这条路径。
+type nthWriteFailSerialPort struct {
+	failOn   int32
+	writeErr error
+	writes   atomic.Int32
+	escSent  atomic.Bool
+	closed   atomic.Bool
+}
+
+func (p *nthWriteFailSerialPort) SetMode(*serial.Mode) error { return nil }
+func (p *nthWriteFailSerialPort) Read([]byte) (int, error)   { return 0, io.EOF }
+func (p *nthWriteFailSerialPort) Write(b []byte) (int, error) {
+	if p.writes.Add(1) == p.failOn {
+		return 0, p.writeErr
+	}
+	if len(b) == 1 && b[0] == 0x1B {
+		p.escSent.Store(true)
+	}
+	return len(b), nil
+}
+func (p *nthWriteFailSerialPort) Drain() error             { return nil }
+func (p *nthWriteFailSerialPort) ResetInputBuffer() error  { return nil }
+func (p *nthWriteFailSerialPort) ResetOutputBuffer() error { return nil }
+func (p *nthWriteFailSerialPort) SetDTR(bool) error        { return nil }
+func (p *nthWriteFailSerialPort) SetRTS(bool) error        { return nil }
+func (p *nthWriteFailSerialPort) GetModemStatusBits() (*serial.ModemStatusBits, error) {
+	return nil, nil
+}
+func (p *nthWriteFailSerialPort) SetReadTimeout(time.Duration) error { return nil }
+func (p *nthWriteFailSerialPort) Close() error {
+	p.closed.Store(true)
+	return nil
+}
+func (p *nthWriteFailSerialPort) Break(time.Duration) error { return nil }
+
+func TestHandleCommandReportsFollowUpWriteFailureInsteadOfTimeout(t *testing.T) {
+	m, err := New(config.DeviceConfig{ID: "dev-at", ATPort: "/dev/ttyUSB6", DeviceBackend: "at"})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	// 第 1 次写是命令本身，第 2 次是收到 '>' 后的正文。
+	port := &nthWriteFailSerialPort{failOn: 2, writeErr: errors.New("input/output error")}
+	m.port = port
+	m.running = true
+	m.healthy = true
+
+	req := commandRequest{
+		cmd:         `AT+CMGS="10086"`,
+		timeout:     10 * time.Second,
+		interactive: true,
+		waitPrompt:  true,
+		followUp:    "hello\x1a",
+		respChan:    make(chan string, 1),
+		errChan:     make(chan error, 1),
+	}
+
+	done := make(chan struct{})
+	go func() {
+		m.handleCommand(req)
+		close(done)
+	}()
+	m.rxChan <- rxMsg{Data: "> "}
+
+	select {
+	case err := <-req.errChan:
+		if err == nil || !strings.Contains(err.Error(), "发送后续数据失败") {
+			t.Fatalf("error = %v, want 发送后续数据失败", err)
+		}
+		if !strings.Contains(err.Error(), "input/output error") {
+			t.Fatalf("error = %v, want the underlying write error to be wrapped", err)
+		}
+	case resp := <-req.respChan:
+		t.Fatalf("respChan = %q, want the write failure to be reported", resp)
+	case <-time.After(2 * time.Second):
+		// 命令超时是 10s，所以走到这里说明写失败被等成了超时。
+		t.Fatal("handleCommand 把写失败等成了超时，真实原因被掩盖")
+	}
+
+	<-done
+	if !port.escSent.Load() {
+		t.Fatal("未发送 ESC，模块会停在短信输入模式吞掉后续命令")
+	}
+	if m.CanExecuteAT() {
+		t.Fatal("CanExecuteAT() = true after a fatal write error, want false")
+	}
+}

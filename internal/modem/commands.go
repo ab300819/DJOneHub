@@ -414,7 +414,7 @@ func (m *Manager) ClearLogicalChannels() {
 			lease.Touch()
 		}
 		cmd := fmt.Sprintf("AT+CCHC=%d", i)
-		m.ExecuteATSilent(cmd, 2*time.Second)
+		_, _ = m.ExecuteATSilent(cmd, 2*time.Second)
 		if lease != nil {
 			lease.Touch()
 			lease.Release()

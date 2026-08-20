@@ -482,7 +482,10 @@ func (m *Manager) Start() error {
 		return fmt.Errorf("打开串口 %s 失败: %w", m.atPort, err)
 	}
 
-	m.port.SetReadTimeout(100 * time.Millisecond)
+	if err := m.port.SetReadTimeout(100 * time.Millisecond); err != nil {
+		// 设不上超时的话 readLoop 的 Read 可能永久阻塞，连关机都会挂住。
+		return fmt.Errorf("设置串口 %s 读超时失败: %w", m.atPort, err)
+	}
 	m.running = true
 
 	// 启动读取协程
@@ -649,8 +652,13 @@ RespLoop:
 		select {
 		case <-timeoutTimer.C:
 			// 超时时尝试发送 ESC (0x1B) 以取消可能的挂起操作（如短信输入）
-			m.port.Write([]byte{0x1B})
-			logger.Warn(fmt.Sprintf("[%s] 命令执行超时，已发送 ESC 尝试恢复", m.cfg.ID), "port", m.atPort, "cmd", req.cmd, "cost", time.Since(startTime).String())
+			recovery := "已发送 ESC 尝试恢复"
+			if _, err := m.port.Write([]byte{0x1B}); err != nil {
+				// 恢复动作本身失败时模块可能仍停在输入模式，后续命令会被当作
+				// 正文吞掉，所以这必须能从日志里看出来。
+				recovery = "ESC 发送失败，模块可能仍处于挂起状态：" + err.Error()
+			}
+			logger.Warn(fmt.Sprintf("[%s] 命令执行超时，%s", m.cfg.ID, recovery), "port", m.atPort, "cmd", req.cmd, "cost", time.Since(startTime).String())
 			req.errChan <- errors.New("命令执行超时")
 			if failures, tripped := m.recordATTimeout(req); tripped {
 				m.tripATTimeoutWatchdog(req.cmd, failures)
@@ -699,7 +707,17 @@ RespLoop:
 
 				if req.interactive && req.waitPrompt && req.followUp != "" {
 					// 收到提示符，立即发送后续指令
-					m.port.Write([]byte(req.followUp))
+					if _, err := m.port.Write([]byte(req.followUp)); err != nil {
+						// 模块已给出 '>' 并在等正文。继续等 OK/ERROR 只会耗满超时，
+						// 把调用方引向"超时"而不是真正的写失败。先照超时路径发
+						// ESC，否则下一条命令会被当作正文吞掉。
+						_, _ = m.port.Write([]byte{0x1B})
+						req.errChan <- fmt.Errorf("发送后续数据失败: %w", err)
+						// 与首次写入同样分类：I/O 错误意味着设备可能已经掉了，
+						// 不走这一步 manager 会继续认为自己是健康的。
+						m.handleFatalSerialRuntimeErr(err, "write", req.cmd)
+						return
+					}
 					// 继续等待最终响应 (OK/ERROR)
 					// 重置 waitPrompt 防止重复触发
 					req.waitPrompt = false
@@ -870,7 +888,7 @@ func (m *Manager) initModem() {
 
 	for _, cmd := range initCmds {
 		// 这些初始化命令使用 ExecuteATSilent 降低日志噪音，避免用户误解全在走 AT
-		m.ExecuteATSilent(cmd, 2*time.Second)
+		_, _ = m.ExecuteATSilent(cmd, 2*time.Second)
 		time.Sleep(100 * time.Millisecond)
 	}
 
@@ -1503,7 +1521,7 @@ func (m *Manager) readAndProcessSMSFromStorage(storage, index string) {
 	// 如果内容为空（说明是分片且未完成），则不进行回调
 	if content == "" {
 		// 删除已读分片 (非常重要，否则SIM卡满了)
-		m.ExecuteAT("AT+CMGD="+index, 3*time.Second)
+		m.deleteReadSMS(index)
 		return
 	}
 
@@ -1515,7 +1533,16 @@ func (m *Manager) readAndProcessSMSFromStorage(storage, index string) {
 	}
 
 	// 删除已读短信
-	m.ExecuteAT("AT+CMGD="+index, 3*time.Second)
+	m.deleteReadSMS(index)
+}
+
+// deleteReadSMS 删除模块上已处理的短信。失败只记日志——短信已经交付出去了，
+// 没有可回滚的动作。但必须留痕：删不掉会让 SIM 存储逐渐填满，最终表现为收不到
+// 新短信，那时离根因已经很远。
+func (m *Manager) deleteReadSMS(index string) {
+	if _, err := m.ExecuteAT("AT+CMGD="+index, 3*time.Second); err != nil {
+		logger.Warn(fmt.Sprintf("[%s] 删除已读短信失败，SIM 存储可能累积", m.cfg.ID), "index", index, "err", err)
+	}
 }
 
 func normalizeSMSIndex(index string) (string, bool) {
@@ -2127,7 +2154,7 @@ func (m *Manager) ExecuteUSSD(command string, timeout time.Duration) (*USSDResul
 	logger.Info(fmt.Sprintf("[%s] 开始执行 USSD: %s", m.cfg.ID, command), "timeout", timeout.String())
 
 	// 设置字符集，避免部分模组因使用非 GSM 的短信格式导致发不出去 USSD
-	m.ExecuteATSilent(`AT+CSCS="GSM"`, 2*time.Second)
+	_, _ = m.ExecuteATSilent(`AT+CSCS="GSM"`, 2*time.Second)
 
 	// 发送 AT+CUSD=1,"command",15
 	cmd := fmt.Sprintf(`AT+CUSD=1,"%s",15`, command)
@@ -2254,7 +2281,8 @@ func (m *Manager) QueryUSBAudioMode() (bool, int, error) {
 	enabled := strings.TrimSpace(parts[0]) == "1"
 	mode := 0
 	if len(parts) > 1 {
-		fmt.Sscanf(strings.TrimSpace(parts[1]), "%d", &mode)
+		// 唯一的调用方丢弃 mode，解析不出留 0 即可。
+		_, _ = fmt.Sscanf(strings.TrimSpace(parts[1]), "%d", &mode)
 	}
 	return enabled, mode, nil
 }

@@ -535,8 +535,10 @@ func ParseCRSM(resp string) (int, int, string, bool) {
 	}
 
 	sw1, sw2 := 0, 0
-	fmt.Sscanf(strings.TrimSpace(parts[0]), "%d", &sw1)
-	fmt.Sscanf(strings.TrimSpace(parts[1]), "%d", &sw2)
+	// 解析失败时留 0：两个调用方都要求 sw1==144 && sw2==0，0 会被拦下，
+	// 且它们的错误信息带上 sw1/sw2，足以指回这里。
+	_, _ = fmt.Sscanf(strings.TrimSpace(parts[0]), "%d", &sw1)
+	_, _ = fmt.Sscanf(strings.TrimSpace(parts[1]), "%d", &sw2)
 
 	data := ""
 	if len(parts) == 3 {
