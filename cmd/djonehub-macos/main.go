@@ -1432,23 +1432,24 @@ func classifyMacInterfaceName(name string) string {
 	}
 }
 
-func hasLikelyUSBNetworkInterface(interfaces []macNetInterface) bool {
-	for _, item := range interfaces {
-		if item.Kind == "ethernet" && item.Name != "en0" && item.Status == "active" {
-			return true
-		}
-	}
-	return false
+// hasUSBNetworkInterface reports whether the module has an interface of its own
+// that is up. Any other interface being up says nothing about the module.
+func hasUSBNetworkInterface(interfaces []macNetInterface, moduleInterface string) bool {
+	return selectUSBTrafficInterface(interfaces, moduleInterface) != ""
 }
 
-func selectUSBTrafficInterface(interfaces []macNetInterface, route macDefaultRoute) string {
-	for _, item := range interfaces {
-		if item.Name == route.Interface && item.Kind == "ethernet" && item.Name != "en0" && item.Status == "active" {
-			return item.Name
-		}
+// selectUSBTrafficInterface returns the module's interface, and only that.
+//
+// It used to fall back to "any active ethernet that is not en0", which reported
+// whatever NIC happened to be up — on a machine where en0 is wired and Wi-Fi is
+// en1, that meant presenting the user's Wi-Fi traffic as the module's. Reporting
+// nothing is the correct answer when the module has no interface.
+func selectUSBTrafficInterface(interfaces []macNetInterface, moduleInterface string) string {
+	if moduleInterface == "" {
+		return ""
 	}
 	for _, item := range interfaces {
-		if item.Kind == "ethernet" && item.Name != "en0" && item.Status == "active" {
+		if item.Name == moduleInterface && item.Status == "active" {
 			return item.Name
 		}
 	}
@@ -1960,4 +1961,34 @@ func writeJSON(w http.ResponseWriter, status int, value any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(value)
+}
+
+// discoverModuleNetworkInterface asks IOKit which network interface belongs to
+// the module. ioreg prints one blank-line-separated block per USB device and
+// includes that device's whole subtree, so the ECM driver's BSD name sits in
+// the same block as the module's own idVendor.
+//
+// This is the only sound way to answer the question. Interface names are handed
+// out in enumeration order, so "en0 is Wi-Fi and any other en* is the module"
+// is wrong on any machine with a second NIC — including ones where en0 is wired
+// and Wi-Fi landed on en1.
+func discoverModuleNetworkInterface() string {
+	out, err := exec.Command("ioreg", "-r", "-c", "IOUSBHostDevice", "-l", "-w", "0").Output()
+	if err != nil {
+		return ""
+	}
+	return parseModuleNetworkInterface(string(out))
+}
+
+func parseModuleNetworkInterface(out string) string {
+	for _, block := range strings.Split(out, "\n\n") {
+		vendorID, ok := intProperty(block, "idVendor")
+		if !ok || (vendorID != 0x2ca3 && vendorID != 0x2c7c) {
+			continue
+		}
+		if name := stringProperty(block, "BSD Name"); strings.HasPrefix(name, "en") {
+			return name
+		}
+	}
+	return ""
 }

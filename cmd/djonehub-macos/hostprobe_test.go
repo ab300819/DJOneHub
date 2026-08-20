@@ -13,6 +13,7 @@ import (
 // plugged in, so none of the branches below could be pinned down.
 type fakeHost struct {
 	usb         *usbDeviceStatus
+	moduleIface string
 	interfaces  []macNetInterface
 	route       macDefaultRoute
 	counters    map[string]networkByteCounters
@@ -22,6 +23,7 @@ type fakeHost struct {
 }
 
 func (f fakeHost) USBDevice() *usbDeviceStatus          { return f.usb }
+func (f fakeHost) ModuleInterface() string              { return f.moduleIface }
 func (f fakeHost) NetworkInterfaces() []macNetInterface { return f.interfaces }
 func (f fakeHost) DefaultRoute() macDefaultRoute        { return f.route }
 
@@ -40,7 +42,8 @@ func (f fakeHost) ProcessFlows(protocol string) ([]service.ActivityRecord, error
 // already pointed at it — the state the whole feature exists to produce.
 func moduleAttached() fakeHost {
 	return fakeHost{
-		usb: &usbDeviceStatus{Vendor: "Quectel", Product: "EG25-G"},
+		usb:         &usbDeviceStatus{Vendor: "Quectel", Product: "EG25-G"},
+		moduleIface: "en11",
 		interfaces: []macNetInterface{
 			{Name: "en0", Kind: "wifi", Status: "active", IPv4: "192.168.1.20"},
 			{Name: "en11", Kind: "ethernet", Status: "active", IPv4: "192.168.225.34"},
@@ -264,5 +267,98 @@ func TestUnsupportedHostDegradesInsteadOfFailing(t *testing.T) {
 	}
 	if result := instance.Check4GRoute(); result.OK {
 		t.Errorf("Check4GRoute() = %+v, want not OK", result)
+	}
+}
+
+// ioregWithModule is shaped like `ioreg -r -c IOUSBHostDevice -l -w 0`: one
+// blank-line-separated block per USB device, each carrying its whole subtree, so
+// the ECM driver's BSD name sits in the same block as the module's idVendor.
+const ioregWithModule = `+-o USB2 Hub@02100000  <class IOUSBHostDevice, id 0x100000a88, registered, matched, active, busy 0 (475 ms), retain 37>
+  |   "idProduct" = 10775
+  |   "idVendor" = 1452
+  | +-o IOUSBHostInterface@0  <class IOUSBHostInterface, id 0x100000a89, registered, matched, active, busy 0, retain 8>
+  | |   "bInterfaceNumber" = 0
+
++-o Baiwang@01100000  <class IOUSBHostDevice, id 0x1000cd001, registered, matched, active, busy 0 (120 ms), retain 44>
+  |   "idProduct" = 293
+  |   "idVendor" = 11388
+  |   "USB Product Name" = "Baiwang"
+  | +-o IOUSBHostInterface@0  <class IOUSBHostInterface, id 0x1000cd010, registered, matched, active, busy 0, retain 9>
+  | |   "bInterfaceClass" = 2
+  | |   "bInterfaceNumber" = 0
+  | | +-o AppleUserECMControl  <class AppleUserECMControl, id 0x1000cd020, registered, matched, active, busy 0, retain 7>
+  | | | +-o en11  <class IOEthernetInterface, id 0x1000cd030, registered, matched, active, busy 0, retain 6>
+  | | | |   "BSD Name" = "en11"
+  | | | |   "IOInterfaceUnit" = 11
+
++-o USB 2.0 BILLBOARD@01100000  <class IOUSBHostDevice, id 0x100000a95, registered, matched, active, busy 0 (389 ms), retain 71>
+  |   "idProduct" = 20549
+  |   "idVendor" = 1155
+`
+
+func TestParseModuleNetworkInterfaceFindsTheModulesOwnNIC(t *testing.T) {
+	if got := parseModuleNetworkInterface(ioregWithModule); got != "en11" {
+		t.Fatalf("parseModuleNetworkInterface() = %q, want en11", got)
+	}
+}
+
+// Other USB devices on the bus have interfaces of their own. None of them is
+// the answer.
+func TestParseModuleNetworkInterfaceIgnoresOtherDevices(t *testing.T) {
+	withoutModule := `+-o iPhone@03100000  <class IOUSBHostDevice, id 0x1000cc529, registered, matched, active, busy 0, retain 51>
+  |   "idVendor" = 1452
+  | +-o en5  <class IOEthernetInterface, id 0x1000cc600, registered, matched, active, busy 0, retain 6>
+  | |   "BSD Name" = "en5"
+`
+	if got := parseModuleNetworkInterface(withoutModule); got != "" {
+		t.Fatalf("parseModuleNetworkInterface() = %q for a bus without the module, want none", got)
+	}
+}
+
+// The module enumerates before its network interface comes up, and in QMI mode
+// it never gets one at all.
+func TestParseModuleNetworkInterfaceReportsNothingBeforeECMBinds(t *testing.T) {
+	qmiMode := `+-o Baiwang@01100000  <class IOUSBHostDevice, id 0x1000cd001, registered, matched, active, busy 0, retain 44>
+  |   "idVendor" = 11388
+  | +-o IOUSBHostInterface@4  <class IOUSBHostInterface, id 0x1000cd040, registered, matched, active, busy 0, retain 9>
+  | |   "bInterfaceClass" = 255
+  | |   "bInterfaceNumber" = 4
+`
+	if got := parseModuleNetworkInterface(qmiMode); got != "" {
+		t.Fatalf("parseModuleNetworkInterface() = %q with no ECM interface, want none", got)
+	}
+}
+
+// The bug this replaced: a second active ethernet interface that is not the
+// module was accepted as proof the module was carrying traffic. On a Mac where
+// en0 is wired and Wi-Fi is en1, that reported Wi-Fi as the 4G link.
+func TestCheck4GRouteRejectsASecondNICThatIsNotTheModule(t *testing.T) {
+	host := fakeHost{
+		usb:         &usbDeviceStatus{Vendor: "Quectel", Product: "EG25-G"},
+		moduleIface: "",
+		interfaces: []macNetInterface{
+			{Name: "en0", Kind: "ethernet", Status: "active", IPv4: "192.168.1.29"},
+			{Name: "en1", Kind: "ethernet", Status: "active", IPv4: "10.0.0.7"},
+		},
+		route: macDefaultRoute{Interface: "en1", Gateway: "10.0.0.1"},
+	}
+	if result := (&app{host: host}).Check4GRoute(); result.OK {
+		t.Errorf("Check4GRoute() = %+v, want not OK: en1 is Wi-Fi, not the module", result)
+	}
+}
+
+func TestNetworkDiagnosticDoesNotClaimAUSBNetworkFromAnotherNIC(t *testing.T) {
+	host := fakeHost{
+		interfaces: []macNetInterface{
+			{Name: "en0", Kind: "ethernet", Status: "active"},
+			{Name: "en1", Kind: "ethernet", Status: "active"},
+		},
+	}
+	diag, err := (&app{host: host, demo: true}).NetworkDiagnostic()
+	if err != nil {
+		t.Fatalf("NetworkDiagnostic() error = %v", err)
+	}
+	if diag.USBNetworkPresent {
+		t.Error("USBNetworkPresent = true with no module interface present")
 	}
 }

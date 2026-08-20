@@ -17,6 +17,8 @@ func defaultHostProbe() HostProbe { return darwinHost{} }
 
 func (darwinHost) USBDevice() *usbDeviceStatus { return discoverDJIUSBDevice() }
 
+func (darwinHost) ModuleInterface() string { return discoverModuleNetworkInterface() }
+
 func (darwinHost) NetworkInterfaces() []macNetInterface { return discoverMacNetworkInterfaces() }
 
 func (darwinHost) DefaultRoute() macDefaultRoute { return discoverMacDefaultRoute() }

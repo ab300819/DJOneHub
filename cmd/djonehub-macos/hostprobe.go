@@ -18,6 +18,12 @@ type HostProbe interface {
 	// USBDevice reports the attached module, or nil when none is present.
 	USBDevice() *usbDeviceStatus
 
+	// ModuleInterface names the network interface the module itself created,
+	// or "" when the module is absent or has no network interface up. It is the
+	// only trustworthy answer to "which interface is the module": interface
+	// names are assigned in enumeration order and say nothing about hardware.
+	ModuleInterface() string
+
 	// NetworkInterfaces lists the machine's interfaces with their addresses.
 	NetworkInterfaces() []macNetInterface
 
@@ -49,6 +55,8 @@ func (a *app) probe() HostProbe {
 type unsupportedHost struct{}
 
 func (unsupportedHost) USBDevice() *usbDeviceStatus { return nil }
+
+func (unsupportedHost) ModuleInterface() string { return "" }
 
 func (unsupportedHost) NetworkInterfaces() []macNetInterface { return nil }
 

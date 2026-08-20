@@ -52,6 +52,26 @@ AT 命令解析、掉线时丢弃句柄的生命周期、以及短信分段提�
 隧道而不是模块网卡上读、采样器失败不能带走整个快照。这些分支此前只能靠开发机
 当时恰好插着什么来碰。
 
+## 顺带修掉的一个真实错误
+
+`selectUSBTrafficInterface` / `hasLikelyUSBNetworkInterface` / `Check4GRoute`
+三处判据都是"`en0` 是 Wi-Fi，其余活跃的 `en*` 就是模块"。macOS 的接口名按枚举
+顺序分配，跟硬件无关：开发机上 `en0` 是有线、`en1` 是 Wi-Fi，于是
+`/api/network/traffic` 把 74 GB 的 Wi-Fi 流量当成 4G 模块流量报了出来，
+`usb_network_present` 在没插模块时也是 true。
+
+正解是从模块自己反查：`ioreg -r -c IOUSBHostDevice -l` 每个 USB 设备一个
+空行分隔的块，块内含整棵子树，所以 ECM 驱动的 `BSD Name` 就在模块 `idVendor`
+所在的那个块里。`HostProbe.ModuleInterface()` 返回这个名字，判据全部改为
+"默认出口是不是模块的网卡"，查不到就报告没有，不再兜底挑别的网卡。
+
+护栏如实报出两处刻意变化：`usb_network_present` true→false，
+`network/traffic` 由 `en1` 变为不可用。`check-4g` 无变化只因为当时默认出口在
+VPN 隧道上，旧代码恰好也返回否；测试补上了默认出口落在非模块网卡的场景。
+
+**待硬件确认**：ioreg 里 ECM 子树的确切形状是按 CDC-ECM 的标准结构构造样本
+测的，模块插上后需要实测一次 `ModuleInterface()` 是否真的返回网卡名。
+
 ## 待做
 
 ### 第三趟：搬包

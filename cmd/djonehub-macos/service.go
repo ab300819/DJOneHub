@@ -197,7 +197,7 @@ func (a *app) NetworkDiagnostic() (result service.NetworkDiagnostic, err error) 
 		Raw:           raw,
 		Errors:        errs,
 	}
-	diag.USBNetworkPresent = hasLikelyUSBNetworkInterface(diag.MacInterfaces)
+	diag.USBNetworkPresent = hasUSBNetworkInterface(diag.MacInterfaces, a.probe().ModuleInterface())
 
 	commands := map[string]string{
 		"usbnet":  `AT+QCFG="usbnet"`,
@@ -230,7 +230,7 @@ func (a *app) NetworkTraffic() service.TrafficSnapshot {
 	snapshot := service.TrafficSnapshot{SampledAtMS: time.Now().UnixMilli()}
 
 	interfaces := a.probe().NetworkInterfaces()
-	name := selectUSBTrafficInterface(interfaces, a.probe().DefaultRoute())
+	name := selectUSBTrafficInterface(interfaces, a.probe().ModuleInterface())
 	if name == "" {
 		return snapshot
 	}
@@ -277,7 +277,7 @@ func (a *app) LocalNetworkConnection() *service.LocalConnection {
 	}
 	interfaces := a.probe().NetworkInterfaces()
 	route := a.probe().DefaultRoute()
-	name := selectUSBTrafficInterface(interfaces, route)
+	name := selectUSBTrafficInterface(interfaces, a.probe().ModuleInterface())
 	if name == "" {
 		return nil
 	}
@@ -302,7 +302,7 @@ func (a *app) NetworkActivity() service.ActivitySnapshot {
 	}
 	interfaces := probe.NetworkInterfaces()
 	route := probe.DefaultRoute()
-	physical := selectUSBTrafficInterface(interfaces, route)
+	physical := selectUSBTrafficInterface(interfaces, probe.ModuleInterface())
 	if physical == "" {
 		return snapshot
 	}
@@ -360,8 +360,10 @@ func (a *app) NetworkActivity() service.ActivitySnapshot {
 }
 
 func (a *app) Check4GRoute() service.NetworkCheckResult {
-	route := a.probe().DefaultRoute()
-	interfaces := a.probe().NetworkInterfaces()
+	probe := a.probe()
+	route := probe.DefaultRoute()
+	interfaces := probe.NetworkInterfaces()
+	moduleInterface := probe.ModuleInterface()
 	var active *service.MacNetInterface
 	for i := range interfaces {
 		if interfaces[i].Name == route.Interface {
@@ -376,7 +378,11 @@ func (a *app) Check4GRoute() service.NetworkCheckResult {
 			Detail:  "macOS 没有返回 default route",
 		}
 	}
-	if active != nil && active.Name != "en0" && active.Kind == "ethernet" && active.Status == "active" {
+	// The question is whether the module's own interface is the default exit.
+	// It used to be answered by "an active ethernet that is not en0", which says
+	// yes to any second NIC — Wi-Fi included, on machines where Wi-Fi is not en0.
+	if moduleInterface != "" && route.Interface == moduleInterface &&
+		active != nil && active.Status == "active" {
 		return service.NetworkCheckResult{
 			OK:      true,
 			Summary: "当前正在走 4G 模块",
