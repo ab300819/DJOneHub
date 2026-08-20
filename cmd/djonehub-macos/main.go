@@ -82,6 +82,9 @@ type app struct {
 
 	moduleNotesMu sync.Mutex
 
+	eventMu   sync.RWMutex
+	eventSink EventSink
+
 	trafficMu        sync.Mutex
 	trafficBaselines map[string]networkByteCounters
 }

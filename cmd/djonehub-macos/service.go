@@ -622,6 +622,7 @@ func (a *app) DownloadESIMProfile(ctx context.Context, request service.ESIMDownl
 	result, err := esimManager.DownloadProfile(ctx, request.AID, smdp, request.MatchingID,
 		request.ConfirmationCode, request.IMEI, func(event esim.DownloadProgressEvent) {
 			log.Printf("eSIM download %d%% %s", event.Pct, event.Msg)
+			a.emit(Event{Event: EventESIMDownloadProgress, Percent: event.Pct, Message: event.Msg})
 		})
 	if err != nil {
 		return service.ESIMDownloadResult{}, service.Fail(service.KindUpstream, "下载 Profile 失败: %v", err)
