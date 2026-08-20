@@ -23,9 +23,20 @@
 客户端不必匹配错误文本。事件通道（`EventSink`）已就位，eSIM 下载进度可推送；
 不能推送的传输不装 sink，行为与之前一致。
 
+**`ATTransport`**
+
+核心对模块的唯一视图，4 个方法。`openDJIUSBAT` 返回接口而非 `*usbAT`——
+存进接口字段的 nil 指针不是 nil 接口，而 `a.usbAT != nil` 在十几处被判断。
+AT 响应解析（`atResponseComplete` / `atProbeSucceeded` 等）是纯文本处理，
+一并搬到接口这一侧，`usbat_stub.go` 补上 `Description()` 后非 darwin 构建
+首次编译通过——之前一直是坏的，CI 只跑 macOS 所以没暴露。
+
+收益立刻兑现：`attransport_test.go` 用假实现覆盖了 `usbATStatus` 的 11 条
+AT 命令解析、掉线时丢弃句柄的生命周期、以及短信分段提交——全都不再需要硬件。
+
 ## 待做
 
-### 第二趟：依赖倒置（两个接口）
+### 第二趟剩余：`HostProbe`
 
 `main.go` 里约 110 个函数，其中一大块是 macOS 主机探测，而 5 个 service 方法
 直接依赖它们。要抽两个接口而非一个：
@@ -35,13 +46,11 @@
 | `ATTransport` | 与模块通信 | libusb / cgo | Kotlin `bulkTransfer` 经 gomobile 回调 |
 | `HostProbe` | 探测主机 OS | `ioreg` / `ifconfig` / `route` / `nettop` | Android API，或明确返回不支持 |
 
-`ATTransport` 对外只需 4 个方法（`Command` / `CommandWithPrompt` / `Close` /
-`Description`），且已有 `//go:build darwin && cgo` 的平台分割，接口是现成的形状。
+`ATTransport` 已完成（见上）。剩下 `HostProbe`：覆盖四类探测，牵动
+`NetworkDiagnostic` / `NetworkTraffic` / `Check4GRoute` /
+`LocalNetworkConnection` / `NetworkActivity`。
 
-`HostProbe` 覆盖四类探测，牵动 `NetworkDiagnostic` / `NetworkTraffic` /
-`Check4GRoute` / `LocalNetworkConnection` / `NetworkActivity`。
-
-倒置后核心逻辑可脱离硬件测试——目前做不到。
+分两个提交做而不是一次抽两个接口：出问题时能定位到是哪个接口引入的。
 
 ### 第三趟：搬包
 
@@ -79,8 +88,8 @@ scripts/compare-api.sh after
 scripts/compare-api.sh diff
 ```
 
-覆盖 21 个端点响应体 + 5 个错误状态码。基线用 `git worktree` 单独构建，
-不受工作区状态影响。
+覆盖 21 个端点响应体 + 5 个错误状态码，端点消失也算不一致。有漂移则退出码非 0，
+可以直接串在命令里。基线用 `git worktree` 单独构建，不受工作区状态影响。
 
 ## 已知的后续缺口
 

@@ -57,7 +57,7 @@ type app struct {
 	esimMu            sync.RWMutex
 	esim              *esim.Manager
 	esimSwitchAllowed bool
-	usbAT             *usbAT
+	usbAT             ATTransport
 	port              string
 	demo              bool
 	discoveryError    string
