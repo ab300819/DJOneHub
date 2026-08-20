@@ -1,14 +1,32 @@
 version: "2"
 
-# Deliberately narrow. The full default set reports ~49 findings on this tree,
-# and a gate that starts red is a gate nobody fixes. These two catch the class
-# of problem that actually bit us: leftovers from a refactor that still compile.
-#
-# errcheck is the obvious next candidate — 17 of its findings are unchecked
-# writes and AT commands against the modem, which fail silently today. Enable it
-# once those have been triaged.
+# Deliberately narrow. The full default set reported ~49 findings on this tree,
+# and a gate that starts red is a gate nobody fixes. These three catch what has
+# actually bitten us: leftovers from a refactor that still compile, and errors
+# dropped on paths where the failure then resurfaces as something else.
 linters:
   default: none
   enable:
+    - errcheck
     - ineffassign
     - unused
+  settings:
+    errcheck:
+      # Every entry below is teardown on a read or on a device. A Close that
+      # flushes buffered writes reports data loss and must stay checked — if one
+      # is added, give it a checked call site rather than widening this list.
+      exclude-functions:
+        - (io.Closer).Close
+        - (go.bug.st/serial.Port).Close
+        # Logs its own failure (Debug for the expected post-card-reset case,
+        # Warn otherwise) and returns the error only for callers that want it,
+        # so the deferred sites legitimately drop it.
+        - (*github.com/ab300819/DJOneHub/internal/esim.Manager).closeLPAClientForOperation
+  exclusions:
+    rules:
+      # Deferred Close in a test carries no signal: a handle that fails to close
+      # shows up as the test failing on its own terms. Scoped to Close so a real
+      # dropped error in test setup is still reported.
+      - path: _test\.go$
+        linters: [errcheck]
+        text: 'Error return value of `[^`]*\.Close` is not checked'
