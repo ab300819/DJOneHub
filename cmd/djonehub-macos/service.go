@@ -7,7 +7,6 @@ import (
 	"log"
 	"net/http"
 	"net/url"
-	"os/exec"
 	"sort"
 	"strings"
 	"time"
@@ -193,8 +192,8 @@ func (a *app) NetworkDiagnostic() (result service.NetworkDiagnostic, err error) 
 	errs := make(map[string]string)
 	diag := service.NetworkDiagnostic{
 		USBDevice:     a.currentUSBDevice(),
-		MacInterfaces: discoverMacNetworkInterfaces(),
-		DefaultRoute:  discoverMacDefaultRoute(),
+		MacInterfaces: a.probe().NetworkInterfaces(),
+		DefaultRoute:  a.probe().DefaultRoute(),
 		Raw:           raw,
 		Errors:        errs,
 	}
@@ -230,12 +229,12 @@ func (a *app) NetworkDiagnostic() (result service.NetworkDiagnostic, err error) 
 func (a *app) NetworkTraffic() service.TrafficSnapshot {
 	snapshot := service.TrafficSnapshot{SampledAtMS: time.Now().UnixMilli()}
 
-	interfaces := discoverMacNetworkInterfaces()
-	name := selectUSBTrafficInterface(interfaces, discoverMacDefaultRoute())
+	interfaces := a.probe().NetworkInterfaces()
+	name := selectUSBTrafficInterface(interfaces, a.probe().DefaultRoute())
 	if name == "" {
 		return snapshot
 	}
-	counters, err := discoverMacInterfaceCounters()
+	counters, err := a.probe().InterfaceCounters()
 	if err != nil {
 		snapshot.Interface = name
 		snapshot.Error = err.Error()
@@ -273,11 +272,11 @@ func (a *app) NetworkTraffic() service.TrafficSnapshot {
 const maxActivityConnections = 8
 
 func (a *app) LocalNetworkConnection() *service.LocalConnection {
-	if discoverDJIUSBDevice() == nil {
+	if a.probe().USBDevice() == nil {
 		return nil
 	}
-	interfaces := discoverMacNetworkInterfaces()
-	route := discoverMacDefaultRoute()
+	interfaces := a.probe().NetworkInterfaces()
+	route := a.probe().DefaultRoute()
 	name := selectUSBTrafficInterface(interfaces, route)
 	if name == "" {
 		return nil
@@ -296,11 +295,13 @@ func (a *app) LocalNetworkConnection() *service.LocalConnection {
 
 func (a *app) NetworkActivity() service.ActivitySnapshot {
 	snapshot := service.ActivitySnapshot{SampledAtMS: time.Now().UnixMilli()}
-	if discoverDJIUSBDevice() == nil {
+	// Held in a local because the samplers below run concurrently.
+	probe := a.probe()
+	if probe.USBDevice() == nil {
 		return snapshot
 	}
-	interfaces := discoverMacNetworkInterfaces()
-	route := discoverMacDefaultRoute()
+	interfaces := probe.NetworkInterfaces()
+	route := probe.DefaultRoute()
 	physical := selectUSBTrafficInterface(interfaces, route)
 	if physical == "" {
 		return snapshot
@@ -326,12 +327,12 @@ func (a *app) NetworkActivity() service.ActivitySnapshot {
 	results := make(chan []service.ActivityRecord, 2)
 	for _, mode := range []string{"tcp", "udp"} {
 		go func(mode string) {
-			out, err := exec.Command("nettop", "-L", "1", "-x", "-m", mode, "-t", "wired").Output()
+			flows, err := probe.ProcessFlows(mode)
 			if err != nil {
 				results <- nil
 				return
 			}
-			results <- parseNettopActivity(string(out))
+			results <- flows
 		}(mode)
 	}
 	var sampled []service.ActivityRecord
@@ -359,8 +360,8 @@ func (a *app) NetworkActivity() service.ActivitySnapshot {
 }
 
 func (a *app) Check4GRoute() service.NetworkCheckResult {
-	route := discoverMacDefaultRoute()
-	interfaces := discoverMacNetworkInterfaces()
+	route := a.probe().DefaultRoute()
+	interfaces := a.probe().NetworkInterfaces()
 	var active *service.MacNetInterface
 	for i := range interfaces {
 		if interfaces[i].Name == route.Interface {

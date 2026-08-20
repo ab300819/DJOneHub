@@ -34,27 +34,30 @@ AT 响应解析（`atResponseComplete` / `atProbeSucceeded` 等）是纯文本�
 收益立刻兑现：`attransport_test.go` 用假实现覆盖了 `usbATStatus` 的 11 条
 AT 命令解析、掉线时丢弃句柄的生命周期、以及短信分段提交——全都不再需要硬件。
 
-## 待做
+**`HostProbe`**
 
-### 第二趟剩余：`HostProbe`
-
-`main.go` 里约 110 个函数，其中一大块是 macOS 主机探测，而 5 个 service 方法
-直接依赖它们。要抽两个接口而非一个：
-
-| 接口 | 职责 | macOS 实现 | Android 实现 |
-| --- | --- | --- | --- |
-| `ATTransport` | 与模块通信 | libusb / cgo | Kotlin `bulkTransfer` 经 gomobile 回调 |
-| `HostProbe` | 探测主机 OS | `ioreg` / `ifconfig` / `route` / `nettop` | Android API，或明确返回不支持 |
-
-`ATTransport` 已完成（见上）。剩下 `HostProbe`：覆盖四类探测，牵动
+五个方法覆盖 `ioreg` / `ifconfig` / `route -n get default` / `netstat -ibn` /
+`nettop`，注入到 `app.host`。核心里不再出现任何命令行工具的名字，
 `NetworkDiagnostic` / `NetworkTraffic` / `Check4GRoute` /
-`LocalNetworkConnection` / `NetworkActivity`。
+`LocalNetworkConnection` / `NetworkActivity` 五个方法全部改为向接口提问。
 
-分两个提交做而不是一次抽两个接口：出问题时能定位到是哪个接口引入的。
+不支持的平台由 `unsupportedHost` 承担——全部返回空而不是报错，形状与 macOS
+上"没插模块"一致。它不带构建标签，因为"没有平台能力"本身不是平台特定的，
+这样测试能直接跑真实实现而不是抄一份。
+
+两个接口分两个提交做，不是一次抽完：出问题时能定位到是哪个接口引入的。
+
+`hostprobe_test.go` 用假主机描述机器状态，覆盖了默认出口是模块 / 是 Wi-Fi /
+读不到三种判定、流量基线首采样与模块重启后计数回退、VPN 起来时连接列表要从
+隧道而不是模块网卡上读、采样器失败不能带走整个快照。这些分支此前只能靠开发机
+当时恰好插着什么来碰。
+
+## 待做
 
 ### 第三趟：搬包
 
-依赖方向正确之后位置才没有歧义：
+依赖方向已经正确，位置就没有歧义了。两个接口的实现函数目前还留在 `main.go`
+里（`discoverMac*` 一族、`parseNettopActivity`、libusb 那套），这一趟把它们搬走：
 
 ```
 core/              可导入的库包（AT 协议 / SMS / eSIM / service 实现 / dispatch）

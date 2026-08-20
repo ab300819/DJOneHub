@@ -58,6 +58,7 @@ type app struct {
 	esim              *esim.Manager
 	esimSwitchAllowed bool
 	usbAT             ATTransport
+	host              HostProbe
 	port              string
 	demo              bool
 	discoveryError    string
@@ -730,7 +731,7 @@ func (a *app) currentUSBDevice() *usbDeviceStatus {
 	if a.modem != nil || a.demo {
 		return a.usbDevice
 	}
-	usbDevice := discoverDJIUSBDevice()
+	usbDevice := a.probe().USBDevice()
 	// Never retain the last successful scan: that is stale after an unplug.
 	a.usbDevice = usbDevice
 	return usbDevice
