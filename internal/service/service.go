@@ -123,6 +123,8 @@ type Service interface {
 	SwitchESIMProfile(ctx context.Context, iccid, aid string) (ESIMSwitchResult, error)
 	// DeleteESIMProfile removes a profile from the card.
 	DeleteESIMProfile(iccid, aid string) (ESIMDeleteResult, error)
+	// RenameESIMProfile changes a profile's nickname on the card.
+	RenameESIMProfile(iccid, aid, name string) (ESIMRenameResult, error)
 	// ProbeESIMPhonebook reports which phonebook operations the module supports.
 	ProbeESIMPhonebook() PhonebookProbe
 }
@@ -217,6 +219,13 @@ type ESIMDeleteResult struct {
 	Demo    bool
 	Message string
 	Result  *esim.DeleteProfileResult
+}
+
+// ESIMRenameResult reports an accepted nickname change. The card returns nothing
+// beyond success, so there is no result body to carry.
+type ESIMRenameResult struct {
+	Demo    bool
+	Message string
 }
 
 // ESIMSwitchResult reports a profile switch and the module restart that follows

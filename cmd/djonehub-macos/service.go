@@ -691,6 +691,25 @@ func (a *app) SwitchESIMProfile(ctx context.Context, iccid, aid string) (service
 	}, nil
 }
 
+func (a *app) RenameESIMProfile(iccid, aid, name string) (service.ESIMRenameResult, error) {
+	esimManager, _ := a.currentESIMManager()
+	if !a.demo && esimManager == nil {
+		return service.ESIMRenameResult{}, service.Fail(service.KindUnavailable, "eSIM manager is unavailable")
+	}
+	iccid = strings.TrimSpace(iccid)
+	name = strings.TrimSpace(name)
+	if iccid == "" || name == "" {
+		return service.ESIMRenameResult{}, service.Fail(service.KindInvalid, "iccid and name are required")
+	}
+	if a.demo {
+		return service.ESIMRenameResult{Demo: true, Message: "Profile 名称修改成功"}, nil
+	}
+	if err := esimManager.RenameProfile(iccid, name, aid); err != nil {
+		return service.ESIMRenameResult{}, service.Fail(service.KindUpstream, "修改 Profile 名称失败: %v", err)
+	}
+	return service.ESIMRenameResult{Message: "Profile 名称修改成功"}, nil
+}
+
 func (a *app) DeleteESIMProfile(iccid, aid string) (service.ESIMDeleteResult, error) {
 	esimManager, _ := a.currentESIMManager()
 	if !a.demo && esimManager == nil {

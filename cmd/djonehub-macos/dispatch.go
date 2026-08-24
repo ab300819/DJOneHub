@@ -314,6 +314,21 @@ func dispatch(svc service.Service, request Request) Response {
 		}
 		return ok(result)
 
+	case "esim.rename":
+		var params struct {
+			ICCID string `json:"iccid"`
+			AID   string `json:"aid"`
+			Name  string `json:"name"`
+		}
+		if failure := bind(&params); failure != nil {
+			return *failure
+		}
+		result, err := svc.RenameESIMProfile(params.ICCID, params.AID, params.Name)
+		if err != nil {
+			return failure(request.ID, err)
+		}
+		return ok(result)
+
 	case "esim.phonebookProbe":
 		return ok(svc.ProbeESIMPhonebook())
 

@@ -66,6 +66,13 @@ capture() {
   post esim/download '{"smdp":"rsp.example.com","imei":"123456789012345"}' p_esim_dl > "$outdir/p_esim_dl.json"
   post esim/phonebook/probe '{}' p_phonebook                     > "$outdir/p_phonebook.json"
 
+  # PATCH does not fit the post helper, and rename went uncovered until the
+  # service layer grew the method the handler used to bypass it for.
+  echo p_esim_rename >> "$outdir/_manifest.txt"
+  curl -s -m 90 -X PATCH "http://127.0.0.1:$PORT/api/esim/profile" \
+    -H 'Content-Type: application/json' \
+    -d '{"iccid":"898601","name":"测试"}' > "$outdir/p_esim_rename.json" || true
+
   code() {
     curl -s -m 90 -o /dev/null -w '%{http_code}' -X "$1" "http://127.0.0.1:$PORT/api/$2" \
       -H 'Content-Type: application/json' -d "$3" || true
@@ -76,6 +83,7 @@ capture() {
     printf 'usbnet_bad %s\n'   "$(code POST network/usbnet '{"mode":9}')"
     printf 'note_bad %s\n'     "$(code PUT esim/notes '{}')"
     printf 'esim_del_bad %s\n' "$(code DELETE esim/profile '{}')"
+    printf 'esim_rename_bad %s\n' "$(code PATCH esim/profile '{"iccid":"898601"}')"
   } > "$outdir/_codes.txt"
 
   kill $pid 2>/dev/null || true

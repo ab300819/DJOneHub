@@ -4,13 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io/fs"
 	"log"
 	"net/http"
 	"os"
 	"os/signal"
-	"strings"
 	"syscall"
 	"time"
 
@@ -383,11 +381,6 @@ func (a *app) switchESIM(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *app) renameESIMProfile(w http.ResponseWriter, r *http.Request) {
-	esimManager, _ := a.currentESIMManager()
-	if !a.demo && esimManager == nil {
-		writeError(w, http.StatusServiceUnavailable, "eSIM manager is unavailable")
-		return
-	}
 	var body struct {
 		ICCID string `json:"iccid"`
 		AID   string `json:"aid"`
@@ -396,21 +389,12 @@ func (a *app) renameESIMProfile(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &body) {
 		return
 	}
-	body.ICCID = strings.TrimSpace(body.ICCID)
-	body.Name = strings.TrimSpace(body.Name)
-	if body.ICCID == "" || body.Name == "" {
-		writeError(w, http.StatusBadRequest, "iccid and name are required")
+	result, err := a.RenameESIMProfile(body.ICCID, body.AID, body.Name)
+	if err != nil {
+		writeServiceError(w, err)
 		return
 	}
-	if a.demo {
-		writeJSON(w, http.StatusOK, map[string]string{"message": "Profile 名称修改成功"})
-		return
-	}
-	if err := esimManager.RenameProfile(body.ICCID, body.Name, body.AID); err != nil {
-		writeError(w, http.StatusBadGateway, fmt.Sprintf("修改 Profile 名称失败: %v", err))
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]string{"message": "Profile 名称修改成功"})
+	writeJSON(w, http.StatusOK, map[string]string{"message": result.Message})
 }
 
 func (a *app) deleteESIMProfile(w http.ResponseWriter, r *http.Request) {
