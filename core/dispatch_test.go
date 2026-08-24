@@ -1,4 +1,4 @@
-package main
+package core
 
 import (
 	"encoding/json"
@@ -18,7 +18,7 @@ func decodeResponse(t *testing.T, raw []byte) Response {
 // A transport has no way to report a request it could not even parse, so Call
 // has to answer with a frame rather than failing.
 func TestCallReportsMalformedRequestAsAResponse(t *testing.T) {
-	response := decodeResponse(t, Call(newDemoApp(unsupportedHost{}), []byte("not json")))
+	response := decodeResponse(t, Call(NewDemo(UnsupportedHost{}), []byte("not json")))
 
 	if response.OK {
 		t.Fatal("malformed request reported success")
@@ -34,7 +34,7 @@ func TestCallReportsMalformedRequestAsAResponse(t *testing.T) {
 // Kind is what lets a client branch without matching on message text, so the
 // classification has to survive the trip through Call.
 func TestCallClassifiesFailures(t *testing.T) {
-	instance := newDemoApp(unsupportedHost{})
+	instance := NewDemo(UnsupportedHost{})
 	for _, testCase := range []struct {
 		name    string
 		request string
@@ -57,7 +57,7 @@ func TestCallClassifiesFailures(t *testing.T) {
 }
 
 func TestCallAnswersWithTheRequestID(t *testing.T) {
-	response := decodeResponse(t, Call(newDemoApp(unsupportedHost{}), []byte(`{"id":77,"method":"health"}`)))
+	response := decodeResponse(t, Call(NewDemo(UnsupportedHost{}), []byte(`{"id":77,"method":"health"}`)))
 
 	if !response.OK {
 		t.Fatalf("health failed: %s", response.Error)
@@ -81,11 +81,11 @@ func (s *recordingSink) Emit(event Event) {
 // Transports that cannot push never install a sink, and emitting has to stay
 // harmless rather than panicking on the nil.
 func TestEmitWithoutASinkIsHarmless(t *testing.T) {
-	newDemoApp(unsupportedHost{}).emit(Event{Event: EventESIMDownloadProgress, Percent: 10})
+	NewDemo(UnsupportedHost{}).emit(Event{Event: EventESIMDownloadProgress, Percent: 10})
 }
 
 func TestEmitReachesTheInstalledSink(t *testing.T) {
-	instance := newDemoApp(unsupportedHost{})
+	instance := NewDemo(UnsupportedHost{})
 	sink := &recordingSink{}
 	instance.SetEventSink(sink)
 

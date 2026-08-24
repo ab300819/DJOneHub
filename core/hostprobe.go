@@ -1,4 +1,4 @@
-package main
+package core
 
 import (
 	"errors"
@@ -35,7 +35,7 @@ type HostProbe interface {
 	DefaultRoute() macDefaultRoute
 
 	// InterfaceCounters reports per-interface byte totals since boot.
-	InterfaceCounters() (map[string]networkByteCounters, error)
+	InterfaceCounters() (map[string]NetworkByteCounters, error)
 
 	// ProcessFlows samples the flows currently on the wire for one protocol,
 	// "tcp" or "udp".
@@ -44,42 +44,42 @@ type HostProbe interface {
 
 // probe returns the host probe this app was built with. Every construction that
 // runs for real injects one; what remains is a net under the tests that build
-// &app{} and never touch the host, so an empty field reports an absent machine
+// &App{} and never touch the host, so an empty field reports an absent machine
 // instead of panicking. It deliberately does not fall back to the platform
 // default: a core that reaches for macOS on its own has no seam at all, and a
 // forgotten injection should look like nothing rather than quietly work on one
 // platform and break on the next.
-func (a *app) probe() HostProbe {
+func (a *App) probe() HostProbe {
 	if a.host != nil {
 		return a.host
 	}
-	return unsupportedHost{}
+	return UnsupportedHost{}
 }
 
-// unsupportedHost is what a platform without ioreg, ifconfig, route and nettop
+// UnsupportedHost is what a platform without ioreg, ifconfig, route and nettop
 // reports: nothing. The network views then degrade to empty, which is the same
 // shape macOS produces when no module is attached. It lives here rather than
 // behind a build tag so that the tests can exercise it on any platform.
-type unsupportedHost struct{}
+type UnsupportedHost struct{}
 
-func (unsupportedHost) USBDevice() *usbDeviceStatus { return nil }
+func (UnsupportedHost) USBDevice() *usbDeviceStatus { return nil }
 
-func (unsupportedHost) ATPort() (string, error) {
+func (UnsupportedHost) ATPort() (string, error) {
 	return "", errors.New("serial AT port discovery is not available on this platform")
 }
 
-func (unsupportedHost) ModuleInterface() string { return "" }
+func (UnsupportedHost) ModuleInterface() string { return "" }
 
-func (unsupportedHost) NetworkInterfaces() []macNetInterface { return nil }
+func (UnsupportedHost) NetworkInterfaces() []macNetInterface { return nil }
 
-func (unsupportedHost) DefaultRoute() macDefaultRoute { return macDefaultRoute{} }
+func (UnsupportedHost) DefaultRoute() macDefaultRoute { return macDefaultRoute{} }
 
-func (unsupportedHost) InterfaceCounters() (map[string]networkByteCounters, error) {
+func (UnsupportedHost) InterfaceCounters() (map[string]NetworkByteCounters, error) {
 	return nil, errors.New("host interface counters are not available on this platform")
 }
 
-func (unsupportedHost) ProcessFlows(string) ([]service.ActivityRecord, error) {
+func (UnsupportedHost) ProcessFlows(string) ([]service.ActivityRecord, error) {
 	return nil, errors.New("host flow sampling is not available on this platform")
 }
 
-var _ HostProbe = unsupportedHost{}
+var _ HostProbe = UnsupportedHost{}

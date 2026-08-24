@@ -12,30 +12,32 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/ab300819/DJOneHub/core"
 	"github.com/ab300819/DJOneHub/internal/service"
 )
 
-func serve(instance *app, listen string) {
+func serve(instance *core.App, listen string) {
 	if stdioMode {
 		serveStdio(instance)
 		return
 	}
 
-	server := &http.Server{
+	health := instance.Health()
+	httpServer := &http.Server{
 		Addr:              listen,
-		Handler:           instance.routes(),
+		Handler:           (&server{svc: instance}).routes(),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	if !instance.demo {
-		log.Printf("DJOneHub is using %s", instance.port)
+	if !health.Demo {
+		log.Printf("DJOneHub is using %s", health.Port)
 	}
 	log.Printf("Open http://%s", listen)
 	serveErr := make(chan error, 1)
 	go func() {
-		serveErr <- server.ListenAndServe()
+		serveErr <- httpServer.ListenAndServe()
 	}()
 
 	var parentGone <-chan struct{}
@@ -52,20 +54,27 @@ func serve(instance *app, listen string) {
 		log.Printf("DJOneHub parent process exited, stopping")
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		if err := server.Shutdown(shutdownCtx); err != nil {
+		if err := httpServer.Shutdown(shutdownCtx); err != nil {
 			log.Printf("HTTP server shutdown: %v", err)
 		}
 	case <-ctx.Done():
 		log.Printf("DJOneHub is stopping")
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		if err := server.Shutdown(shutdownCtx); err != nil {
+		if err := httpServer.Shutdown(shutdownCtx); err != nil {
 			log.Printf("HTTP server shutdown: %v", err)
 		}
 	}
 }
 
-func (a *app) routes() http.Handler {
+// server adapts HTTP to the service interface. It holds no state of its own:
+// every handler below turns a request into one service call and its answer into
+// JSON, which is why the core no longer has to be an HTTP server to be useful.
+type server struct {
+	svc service.Service
+}
+
+func (a *server) routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/health", a.health)
 	mux.HandleFunc("GET /api/status", a.status)
@@ -108,12 +117,12 @@ func securityHeaders(next http.Handler) http.Handler {
 	})
 }
 
-func (a *app) health(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, a.Health())
+func (a *server) health(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, a.svc.Health())
 }
 
-func (a *app) status(w http.ResponseWriter, _ *http.Request) {
-	status, err := a.Status()
+func (a *server) status(w http.ResponseWriter, _ *http.Request) {
+	status, err := a.svc.Status()
 	if err != nil {
 		writeError(w, http.StatusBadGateway, err.Error())
 		return
@@ -125,16 +134,16 @@ func (a *app) status(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, status.Degraded)
 }
 
-func (a *app) listSMS(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, a.ListSMS())
+func (a *server) listSMS(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, a.svc.ListSMS())
 }
 
-func (a *app) smsStatus(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, a.SMSStatus())
+func (a *server) smsStatus(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, a.svc.SMSStatus())
 }
 
-func (a *app) refreshSMS(w http.ResponseWriter, _ *http.Request) {
-	result, err := a.RefreshSMS()
+func (a *server) refreshSMS(w http.ResponseWriter, _ *http.Request) {
+	result, err := a.svc.RefreshSMS()
 	if err != nil {
 		writeServiceError(w, err)
 		return
@@ -142,8 +151,8 @@ func (a *app) refreshSMS(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusAccepted, result)
 }
 
-func (a *app) clearModuleSMS(w http.ResponseWriter, _ *http.Request) {
-	result, err := a.ClearModuleSMS()
+func (a *server) clearModuleSMS(w http.ResponseWriter, _ *http.Request) {
+	result, err := a.svc.ClearModuleSMS()
 	if err != nil {
 		writeServiceError(w, err)
 		return
@@ -151,7 +160,7 @@ func (a *app) clearModuleSMS(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, result)
 }
 
-func (a *app) sendSMS(w http.ResponseWriter, r *http.Request) {
+func (a *server) sendSMS(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Phone   string `json:"phone"`
 		Message string `json:"message"`
@@ -159,7 +168,7 @@ func (a *app) sendSMS(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &body) {
 		return
 	}
-	result, err := a.SendSMS(body.Phone, body.Message)
+	result, err := a.svc.SendSMS(body.Phone, body.Message)
 	if err != nil {
 		writeServiceError(w, err)
 		return
@@ -184,14 +193,14 @@ func writeServiceError(w http.ResponseWriter, err error) {
 	}
 }
 
-func (a *app) executeAT(w http.ResponseWriter, r *http.Request) {
+func (a *server) executeAT(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Command string `json:"command"`
 	}
 	if !decodeJSON(w, r, &body) {
 		return
 	}
-	response, err := a.ExecuteAT(body.Command)
+	response, err := a.svc.ExecuteAT(body.Command)
 	if err != nil {
 		writeServiceError(w, err)
 		return
@@ -199,8 +208,8 @@ func (a *app) executeAT(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"response": response})
 }
 
-func (a *app) networkDiagnostic(w http.ResponseWriter, _ *http.Request) {
-	diag, err := a.NetworkDiagnostic()
+func (a *server) networkDiagnostic(w http.ResponseWriter, _ *http.Request) {
+	diag, err := a.svc.NetworkDiagnostic()
 	if err != nil {
 		writeServiceError(w, err)
 		return
@@ -208,34 +217,34 @@ func (a *app) networkDiagnostic(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, diag)
 }
 
-func (a *app) networkTraffic(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, a.NetworkTraffic())
+func (a *server) networkTraffic(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, a.svc.NetworkTraffic())
 }
 
-func (a *app) localNetworkConnection(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, a.LocalNetworkConnection())
+func (a *server) localNetworkConnection(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, a.svc.LocalNetworkConnection())
 }
 
-func (a *app) networkActivity(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, a.NetworkActivity())
+func (a *server) networkActivity(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, a.svc.NetworkActivity())
 }
 
-func (a *app) check4GRoute(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, a.Check4GRoute())
+func (a *server) check4GRoute(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, a.svc.Check4GRoute())
 }
 
-func (a *app) checkProxyRoute(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, a.CheckProxyRoute())
+func (a *server) checkProxyRoute(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, a.svc.CheckProxyRoute())
 }
 
-func (a *app) setUSBNetMode(w http.ResponseWriter, r *http.Request) {
+func (a *server) setUSBNetMode(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Mode int `json:"mode"`
 	}
 	if !decodeJSON(w, r, &body) {
 		return
 	}
-	result, err := a.SetUSBNetMode(body.Mode)
+	result, err := a.svc.SetUSBNetMode(body.Mode)
 	if err != nil {
 		writeServiceError(w, err)
 		return
@@ -243,8 +252,8 @@ func (a *app) setUSBNetMode(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, result)
 }
 
-func (a *app) rebootModule(w http.ResponseWriter, _ *http.Request) {
-	result, err := a.RebootModule()
+func (a *server) rebootModule(w http.ResponseWriter, _ *http.Request) {
+	result, err := a.svc.RebootModule()
 	if err != nil {
 		writeServiceError(w, err)
 		return
@@ -252,8 +261,8 @@ func (a *app) rebootModule(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusAccepted, result)
 }
 
-func (a *app) listESIMNotes(w http.ResponseWriter, _ *http.Request) {
-	notes, err := a.ListESIMNotes()
+func (a *server) listESIMNotes(w http.ResponseWriter, _ *http.Request) {
+	notes, err := a.svc.ListESIMNotes()
 	if err != nil {
 		writeServiceError(w, err)
 		return
@@ -261,12 +270,12 @@ func (a *app) listESIMNotes(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"notes": notes})
 }
 
-func (a *app) saveESIMNote(w http.ResponseWriter, r *http.Request) {
+func (a *server) saveESIMNote(w http.ResponseWriter, r *http.Request) {
 	var body service.ProfileNoteInput
 	if !decodeJSON(w, r, &body) {
 		return
 	}
-	result, err := a.SaveESIMNote(body)
+	result, err := a.svc.SaveESIMNote(body)
 	if err != nil {
 		writeServiceError(w, err)
 		return
@@ -276,12 +285,12 @@ func (a *app) saveESIMNote(w http.ResponseWriter, r *http.Request) {
 
 // probeESIMPhonebook performs only AT test/read commands. It never writes a
 // phonebook entry, so it is safe to use before enabling portable card notes.
-func (a *app) probeESIMPhonebook(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, a.ProbeESIMPhonebook())
+func (a *server) probeESIMPhonebook(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, a.svc.ProbeESIMPhonebook())
 }
 
-func (a *app) listModuleESIMNotes(w http.ResponseWriter, _ *http.Request) {
-	result, err := a.ListModuleESIMNotes()
+func (a *server) listModuleESIMNotes(w http.ResponseWriter, _ *http.Request) {
+	result, err := a.svc.ListModuleESIMNotes()
 	if err != nil {
 		writeServiceError(w, err)
 		return
@@ -289,12 +298,12 @@ func (a *app) listModuleESIMNotes(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, result)
 }
 
-func (a *app) saveModuleESIMNote(w http.ResponseWriter, r *http.Request) {
-	var body moduleProfileNote
+func (a *server) saveModuleESIMNote(w http.ResponseWriter, r *http.Request) {
+	var body service.ModuleProfileNote
 	if !decodeJSON(w, r, &body) {
 		return
 	}
-	result, err := a.SaveModuleESIMNote(body)
+	result, err := a.svc.SaveModuleESIMNote(body)
 	if err != nil {
 		writeServiceError(w, err)
 		return
@@ -302,8 +311,8 @@ func (a *app) saveModuleESIMNote(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, result)
 }
 
-func (a *app) esimOverview(w http.ResponseWriter, _ *http.Request) {
-	result, err := a.ESIMOverview()
+func (a *server) esimOverview(w http.ResponseWriter, _ *http.Request) {
+	result, err := a.svc.ESIMOverview()
 	if err != nil {
 		writeServiceError(w, err)
 		return
@@ -321,8 +330,8 @@ func (a *app) esimOverview(w http.ResponseWriter, _ *http.Request) {
 	}
 }
 
-func (a *app) esimHealth(w http.ResponseWriter, _ *http.Request) {
-	result, err := a.ESIMHealth()
+func (a *server) esimHealth(w http.ResponseWriter, _ *http.Request) {
+	result, err := a.svc.ESIMHealth()
 	if err != nil {
 		writeServiceError(w, err)
 		return
@@ -347,7 +356,7 @@ func (a *app) esimHealth(w http.ResponseWriter, _ *http.Request) {
 	}
 }
 
-func (a *app) switchESIM(w http.ResponseWriter, r *http.Request) {
+func (a *server) switchESIM(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		ICCID string `json:"iccid"`
 		AID   string `json:"aid"`
@@ -355,7 +364,7 @@ func (a *app) switchESIM(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &body) {
 		return
 	}
-	result, err := a.SwitchESIMProfile(r.Context(), body.ICCID, body.AID)
+	result, err := a.svc.SwitchESIMProfile(r.Context(), body.ICCID, body.AID)
 	if err != nil {
 		writeServiceError(w, err)
 		return
@@ -380,7 +389,7 @@ func (a *app) switchESIM(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (a *app) renameESIMProfile(w http.ResponseWriter, r *http.Request) {
+func (a *server) renameESIMProfile(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		ICCID string `json:"iccid"`
 		AID   string `json:"aid"`
@@ -389,7 +398,7 @@ func (a *app) renameESIMProfile(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &body) {
 		return
 	}
-	result, err := a.RenameESIMProfile(body.ICCID, body.AID, body.Name)
+	result, err := a.svc.RenameESIMProfile(body.ICCID, body.AID, body.Name)
 	if err != nil {
 		writeServiceError(w, err)
 		return
@@ -397,7 +406,7 @@ func (a *app) renameESIMProfile(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"message": result.Message})
 }
 
-func (a *app) deleteESIMProfile(w http.ResponseWriter, r *http.Request) {
+func (a *server) deleteESIMProfile(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		ICCID string `json:"iccid"`
 		AID   string `json:"aid"`
@@ -405,7 +414,7 @@ func (a *app) deleteESIMProfile(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &body) {
 		return
 	}
-	result, err := a.DeleteESIMProfile(body.ICCID, body.AID)
+	result, err := a.svc.DeleteESIMProfile(body.ICCID, body.AID)
 	if err != nil {
 		writeServiceError(w, err)
 		return
@@ -417,12 +426,12 @@ func (a *app) deleteESIMProfile(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, result.Result)
 }
 
-func (a *app) downloadESIMProfile(w http.ResponseWriter, r *http.Request) {
+func (a *server) downloadESIMProfile(w http.ResponseWriter, r *http.Request) {
 	var body service.ESIMDownloadRequest
 	if !decodeJSON(w, r, &body) {
 		return
 	}
-	result, err := a.DownloadESIMProfile(r.Context(), body)
+	result, err := a.svc.DownloadESIMProfile(r.Context(), body)
 	if err != nil {
 		writeServiceError(w, err)
 		return

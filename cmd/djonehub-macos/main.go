@@ -9,11 +9,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ab300819/DJOneHub/core"
 	"github.com/ab300819/DJOneHub/internal/backend"
 	"github.com/ab300819/DJOneHub/internal/config"
 	"github.com/ab300819/DJOneHub/internal/esim"
 	"github.com/ab300819/DJOneHub/internal/modem"
-	"github.com/ab300819/DJOneHub/pkg/smscodec"
 )
 
 //go:embed web/*
@@ -26,13 +26,13 @@ func main() {
 	flag.StringVar(&port, "port", "", "AT serial port; auto-detected when omitted")
 	flag.StringVar(&listen, "listen", "127.0.0.1:7575", "HTTP listen address")
 	flag.BoolVar(&demo, "demo", false, "run the web UI with simulated modem data")
-	flag.IntVar(&parentPID, "parent-pid", 0, "exit when this parent process goes away; used by the macOS app")
+	flag.IntVar(&parentPID, "parent-pid", 0, "exit when this parent process goes away; used by the macOS core.App")
 	flag.BoolVar(&stdioMode, "stdio", false, "serve line-delimited JSON on stdin/stdout instead of HTTP")
 	flag.Parse()
 
 	probe := defaultHostProbe()
 	if demo {
-		instance := newDemoApp(probe)
+		instance := core.NewDemo(probe)
 		log.Printf("DJOneHub demo mode")
 		serve(instance, listen)
 		return
@@ -44,16 +44,14 @@ func main() {
 		if err != nil {
 			usbDevice := probe.USBDevice()
 			usbATDevice, usbATErr := openDJIUSBAT()
-			instance := &app{
-				port:             "未发现 AT 串口",
-				discoveryError:   err.Error(),
-				usbDevice:        usbDevice,
-				usbAT:            usbATDevice,
-				host:             probe,
-				smsPollInterval:  8 * time.Second,
-				smsAutoCleanupME: true,
-				smsReassembler:   smscodec.NewReassembler(),
-			}
+			instance := core.New(core.Options{
+				Host:            probe,
+				ATTransport:     usbATDevice,
+				OpenATTransport: openDJIUSBAT,
+				Port:            "未发现 AT 串口",
+				DiscoveryError:  err.Error(),
+				USBDevice:       usbDevice,
+			})
 			if usbDevice != nil {
 				log.Printf("DJI USB device detected without AT serial port: %s %s (%s:%s)",
 					usbDevice.Vendor, usbDevice.Product, usbDevice.VendorID, usbDevice.ProductID)
@@ -61,14 +59,13 @@ func main() {
 			if usbATErr != nil {
 				log.Printf("USB AT unavailable: %v", usbATErr)
 			} else {
-				instance.port = usbATDevice.Description()
-				instance.discoveryError = ""
+				instance.SetPort(usbATDevice.Description())
 				defer usbATDevice.Close()
 				log.Printf("USB AT bridge opened on DJI %s", usbATDevice.Description())
-				instance.initUSBATESIMManager()
+				instance.InitUSBATESIMManager()
 			}
 			log.Printf("modem discovery skipped: %v", err)
-			go instance.startSMSPoller(context.Background())
+			go instance.StartSMSPoller(context.Background())
 			serve(instance, listen)
 			return
 		}
@@ -92,14 +89,8 @@ func main() {
 		log.Fatalf("create modem manager: %v", err)
 	}
 
-	instance := &app{
-		modem:            manager,
-		host:             probe,
-		port:             port,
-		smsPollInterval:  8 * time.Second,
-		smsAutoCleanupME: true,
-	}
-	manager.SetSMSCallback(instance.recordSMS)
+	instance := core.New(core.Options{Modem: manager, Host: probe, Port: port})
+	manager.SetSMSCallback(instance.RecordSMS)
 	if err := manager.Start(); err != nil {
 		log.Fatalf("open modem on %s: %v", port, err)
 	}
@@ -119,7 +110,7 @@ func main() {
 	if err != nil {
 		log.Printf("eSIM manager unavailable: %v", err)
 	} else {
-		instance.installESIMManager(esimManager, false)
+		instance.InstallESIMManager(esimManager, false)
 	}
 
 	go manager.CheckAllSMS()

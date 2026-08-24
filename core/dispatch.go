@@ -1,4 +1,4 @@
-package main
+package core
 
 import (
 	"context"
@@ -76,13 +76,13 @@ func encode(response Response) []byte {
 
 // SetEventSink installs the destination for unsolicited events. A transport
 // that cannot push simply never calls this, and emit becomes a no-op.
-func (a *app) SetEventSink(sink EventSink) {
+func (a *App) SetEventSink(sink EventSink) {
 	a.eventMu.Lock()
 	defer a.eventMu.Unlock()
 	a.eventSink = sink
 }
 
-func (a *app) emit(event Event) {
+func (a *App) emit(event Event) {
 	a.eventMu.RLock()
 	sink := a.eventSink
 	a.eventMu.RUnlock()

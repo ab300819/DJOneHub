@@ -1,4 +1,4 @@
-package main
+package core
 
 import (
 	"errors"
@@ -11,7 +11,7 @@ import (
 	"github.com/ab300819/DJOneHub/internal/modem"
 )
 
-func (a *app) usbATStatus() (modem.DeviceStatus, error) {
+func (a *App) usbATStatus() (modem.DeviceStatus, error) {
 	firmwareResp, _ := a.usbAT.Command("ATI", 3*time.Second)
 	cpinResp, cpinErr := a.usbAT.Command("AT+CPIN?", 3*time.Second)
 	csqResp, _ := a.usbAT.Command("AT+CSQ", 3*time.Second)
@@ -191,7 +191,7 @@ func parseUSBATQNWInfo(resp string) (mode, duplex, band string, channel uint32) 
 	return mode, duplex, band, channel
 }
 
-func (a *app) runATCommand(command string, timeout time.Duration) (string, error) {
+func (a *App) runATCommand(command string, timeout time.Duration) (string, error) {
 	if a.demo {
 		responses := map[string]string{
 			"AT":                 "OK",
@@ -276,7 +276,7 @@ func atCommandSucceeded(response string) bool {
 	return normalized == "OK" || strings.HasSuffix(normalized, "\nOK")
 }
 
-func (a *app) runATOK(command string, timeout time.Duration) (string, error) {
+func (a *App) runATOK(command string, timeout time.Duration) (string, error) {
 	response, err := a.runATCommand(command, timeout)
 	if err != nil {
 		return "", err

@@ -5,27 +5,30 @@ package main
 import (
 	"os/exec"
 
+	"github.com/ab300819/DJOneHub/core"
 	"github.com/ab300819/DJOneHub/internal/service"
 )
 
-// darwinHost answers HostProbe by running the tools macOS ships with. The
+// darwinHost answers core.HostProbe by running the tools macOS ships with. The
 // discovery and parsing functions it delegates to still live in main.go; the
 // package move puts them here.
 type darwinHost struct{}
 
-func defaultHostProbe() HostProbe { return darwinHost{} }
+func defaultHostProbe() core.HostProbe { return darwinHost{} }
 
-func (darwinHost) USBDevice() *usbDeviceStatus { return discoverDJIUSBDevice() }
+func (darwinHost) USBDevice() *service.USBDevice { return discoverDJIUSBDevice() }
 
 func (darwinHost) ATPort() (string, error) { return discoverATPort() }
 
 func (darwinHost) ModuleInterface() string { return discoverModuleNetworkInterface() }
 
-func (darwinHost) NetworkInterfaces() []macNetInterface { return discoverMacNetworkInterfaces() }
+func (darwinHost) NetworkInterfaces() []service.MacNetInterface {
+	return discoverMacNetworkInterfaces()
+}
 
-func (darwinHost) DefaultRoute() macDefaultRoute { return discoverMacDefaultRoute() }
+func (darwinHost) DefaultRoute() service.MacDefaultRoute { return discoverMacDefaultRoute() }
 
-func (darwinHost) InterfaceCounters() (map[string]networkByteCounters, error) {
+func (darwinHost) InterfaceCounters() (map[string]core.NetworkByteCounters, error) {
 	return discoverMacInterfaceCounters()
 }
 
@@ -41,4 +44,4 @@ func (darwinHost) ProcessFlows(protocol string) ([]service.ActivityRecord, error
 	return parseNettopActivity(string(out)), nil
 }
 
-var _ HostProbe = darwinHost{}
+var _ core.HostProbe = darwinHost{}

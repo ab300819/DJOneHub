@@ -1,9 +1,8 @@
-package main
+package core
 
 import (
 	"context"
 	"fmt"
-	"github.com/ab300819/DJOneHub/internal/esim"
 	"log"
 	"net/http"
 	"net/url"
@@ -11,16 +10,18 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ab300819/DJOneHub/internal/esim"
+
 	"github.com/ab300819/DJOneHub/internal/modem"
 	"github.com/ab300819/DJOneHub/internal/service"
 )
 
-// app satisfies the transport-independent surface, so the HTTP handlers and the
+// App satisfies the transport-independent surface, so the HTTP handlers and the
 // stdio bridge share one implementation instead of each reaching into the modem
 // packages on their own.
-var _ service.Service = (*app)(nil)
+var _ service.Service = (*App)(nil)
 
-func (a *app) Health() service.Health {
+func (a *App) Health() service.Health {
 	esimManager, _ := a.currentESIMManager()
 	return service.Health{
 		OK:             true,
@@ -32,7 +33,7 @@ func (a *app) Health() service.Health {
 	}
 }
 
-func (a *app) Status() (service.Status, error) {
+func (a *App) Status() (service.Status, error) {
 	if a.demo {
 		return service.Status{Device: &modem.DeviceStatus{
 			IMEI:          "867400000000001",
@@ -92,7 +93,7 @@ func (a *app) Status() (service.Status, error) {
 	return service.Status{Device: &full}, nil
 }
 
-func (a *app) ExecuteAT(command string) (string, error) {
+func (a *App) ExecuteAT(command string) (string, error) {
 	if !strings.HasPrefix(strings.ToUpper(strings.TrimSpace(command)), "AT") {
 		return "", service.ErrInvalidCommand
 	}
@@ -104,7 +105,7 @@ func (a *app) ExecuteAT(command string) (string, error) {
 	return response, err
 }
 
-func (a *app) ListSMS() []service.ReceivedSMS {
+func (a *App) ListSMS() []service.ReceivedSMS {
 	a.smsMu.RLock()
 	items := append([]receivedSMS(nil), a.sms...)
 	a.smsMu.RUnlock()
@@ -114,7 +115,7 @@ func (a *app) ListSMS() []service.ReceivedSMS {
 	return items
 }
 
-func (a *app) SMSStatus() service.SMSStatus {
+func (a *App) SMSStatus() service.SMSStatus {
 	a.smsMu.RLock()
 	lastPoll := a.smsLastPoll
 	lastPollError := a.smsLastPollError
@@ -130,7 +131,7 @@ func (a *app) SMSStatus() service.SMSStatus {
 	}
 }
 
-func (a *app) RefreshSMS() (service.RefreshResult, error) {
+func (a *App) RefreshSMS() (service.RefreshResult, error) {
 	if a.demo {
 		return service.RefreshResult{Accepted: true}, nil
 	}
@@ -147,7 +148,7 @@ func (a *app) RefreshSMS() (service.RefreshResult, error) {
 	return service.RefreshResult{Accepted: true}, nil
 }
 
-func (a *app) ClearModuleSMS() (service.ClearResult, error) {
+func (a *App) ClearModuleSMS() (service.ClearResult, error) {
 	if a.demo {
 		return service.ClearResult{Cleared: true}, nil
 	}
@@ -166,12 +167,12 @@ func (a *app) ClearModuleSMS() (service.ClearResult, error) {
 	return service.ClearResult{Cleared: true, Memory: "ME", Before: before, After: after}, nil
 }
 
-func (a *app) SendSMS(phone, message string) (service.SendResult, error) {
+func (a *App) SendSMS(phone, message string) (service.SendResult, error) {
 	if strings.TrimSpace(phone) == "" || strings.TrimSpace(message) == "" {
 		return service.SendResult{}, service.Fail(service.KindInvalid, "phone and message are required")
 	}
 	if a.demo {
-		a.recordSMS("已发送至 "+phone, message, time.Now())
+		a.RecordSMS("已发送至 "+phone, message, time.Now())
 		return service.SendResult{Sent: true, Segments: 1}, nil
 	}
 	segments, err := a.sendTextSMS(phone, message)
@@ -181,7 +182,7 @@ func (a *app) SendSMS(phone, message string) (service.SendResult, error) {
 	return service.SendResult{Sent: true, Segments: segments}, nil
 }
 
-func (a *app) NetworkDiagnostic() (result service.NetworkDiagnostic, err error) {
+func (a *App) NetworkDiagnostic() (result service.NetworkDiagnostic, err error) {
 	defer func() {
 		if recovered := recover(); recovered != nil {
 			log.Printf("network diagnostic panic: %v", recovered)
@@ -226,7 +227,7 @@ func (a *app) NetworkDiagnostic() (result service.NetworkDiagnostic, err error) 
 	return diag, nil
 }
 
-func (a *app) NetworkTraffic() service.TrafficSnapshot {
+func (a *App) NetworkTraffic() service.TrafficSnapshot {
 	snapshot := service.TrafficSnapshot{SampledAtMS: time.Now().UnixMilli()}
 
 	interfaces := a.probe().NetworkInterfaces()
@@ -249,7 +250,7 @@ func (a *app) NetworkTraffic() service.TrafficSnapshot {
 
 	a.trafficMu.Lock()
 	if a.trafficBaselines == nil {
-		a.trafficBaselines = make(map[string]networkByteCounters)
+		a.trafficBaselines = make(map[string]NetworkByteCounters)
 	}
 	baseline, exists := a.trafficBaselines[name]
 	if !exists || current.RX < baseline.RX || current.TX < baseline.TX {
@@ -271,7 +272,7 @@ func (a *app) NetworkTraffic() service.TrafficSnapshot {
 // traffic, so the snapshot keeps the heaviest flows and drops the tail.
 const maxActivityConnections = 8
 
-func (a *app) LocalNetworkConnection() *service.LocalConnection {
+func (a *App) LocalNetworkConnection() *service.LocalConnection {
 	if a.probe().USBDevice() == nil {
 		return nil
 	}
@@ -293,7 +294,7 @@ func (a *app) LocalNetworkConnection() *service.LocalConnection {
 	return nil
 }
 
-func (a *app) NetworkActivity() service.ActivitySnapshot {
+func (a *App) NetworkActivity() service.ActivitySnapshot {
 	snapshot := service.ActivitySnapshot{SampledAtMS: time.Now().UnixMilli()}
 	// Held in a local because the samplers below run concurrently.
 	probe := a.probe()
@@ -359,7 +360,7 @@ func (a *app) NetworkActivity() service.ActivitySnapshot {
 	return snapshot
 }
 
-func (a *app) Check4GRoute() service.NetworkCheckResult {
+func (a *App) Check4GRoute() service.NetworkCheckResult {
 	probe := a.probe()
 	route := probe.DefaultRoute()
 	interfaces := probe.NetworkInterfaces()
@@ -396,7 +397,7 @@ func (a *app) Check4GRoute() service.NetworkCheckResult {
 	return service.NetworkCheckResult{OK: false, Summary: "当前没有优先走 4G 模块", Detail: detail}
 }
 
-func (a *app) CheckProxyRoute() service.NetworkCheckResult {
+func (a *App) CheckProxyRoute() service.NetworkCheckResult {
 	proxyURL, _ := url.Parse("http://127.0.0.1:7890")
 	client := &http.Client{
 		Timeout:   8 * time.Second,
@@ -429,7 +430,7 @@ func (a *app) CheckProxyRoute() service.NetworkCheckResult {
 	}
 }
 
-func (a *app) SetUSBNetMode(mode int) (service.USBNetResult, error) {
+func (a *App) SetUSBNetMode(mode int) (service.USBNetResult, error) {
 	if mode < 0 || mode > 3 {
 		return service.USBNetResult{}, service.Fail(service.KindInvalid,
 			"only usbnet mode 0, 1, 2 or 3 is allowed")
@@ -441,7 +442,7 @@ func (a *app) SetUSBNetMode(mode int) (service.USBNetResult, error) {
 	return service.USBNetResult{Mode: mode, Response: response, NeedsReboot: true}, nil
 }
 
-func (a *app) RebootModule() (service.RebootResult, error) {
+func (a *App) RebootModule() (service.RebootResult, error) {
 	response, err := a.runATCommand("AT+CFUN=1,1", 3*time.Second)
 	if err != nil {
 		return service.RebootResult{}, err
@@ -449,7 +450,7 @@ func (a *app) RebootModule() (service.RebootResult, error) {
 	return service.RebootResult{Accepted: true, Response: response}, nil
 }
 
-func (a *app) ESIMOverview() (service.ESIMOverviewResult, error) {
+func (a *App) ESIMOverview() (service.ESIMOverviewResult, error) {
 	if a.demo {
 		return service.ESIMOverviewResult{DemoPayload: demoESIMOverview()}, nil
 	}
@@ -471,7 +472,7 @@ func (a *app) ESIMOverview() (service.ESIMOverviewResult, error) {
 	return service.ESIMOverviewResult{Overview: overview}, nil
 }
 
-func (a *app) ESIMHealth() (service.ESIMHealthResult, error) {
+func (a *App) ESIMHealth() (service.ESIMHealthResult, error) {
 	esimManager, _ := a.currentESIMManager()
 	if esimManager == nil {
 		return service.ESIMHealthResult{}, service.Fail(service.KindUnavailable, "eSIM manager is unavailable")
@@ -522,7 +523,7 @@ func (a *app) ESIMHealth() (service.ESIMHealthResult, error) {
 	}, nil
 }
 
-func (a *app) ListESIMNotes() (map[string]service.ProfileNote, error) {
+func (a *App) ListESIMNotes() (map[string]service.ProfileNote, error) {
 	a.profileNotesMu.Lock()
 	defer a.profileNotesMu.Unlock()
 	if err := a.loadProfileNotesLocked(); err != nil {
@@ -531,7 +532,7 @@ func (a *app) ListESIMNotes() (map[string]service.ProfileNote, error) {
 	return a.profileNotes, nil
 }
 
-func (a *app) SaveESIMNote(input service.ProfileNoteInput) (service.SavedNote, error) {
+func (a *App) SaveESIMNote(input service.ProfileNoteInput) (service.SavedNote, error) {
 	iccid := strings.TrimSpace(input.ICCID)
 	label := strings.TrimSpace(input.Label)
 	phone := strings.TrimSpace(input.Phone)
@@ -558,7 +559,7 @@ func (a *app) SaveESIMNote(input service.ProfileNoteInput) (service.SavedNote, e
 	return service.SavedNote{Message: "本地备注已保存", Note: a.profileNotes[iccid]}, nil
 }
 
-func (a *app) ListModuleESIMNotes() (service.ModuleNotes, error) {
+func (a *App) ListModuleESIMNotes() (service.ModuleNotes, error) {
 	a.moduleNotesMu.Lock()
 	defer a.moduleNotesMu.Unlock()
 	notes, _, used, total, err := a.readModuleESIMNotes()
@@ -568,7 +569,7 @@ func (a *app) ListModuleESIMNotes() (service.ModuleNotes, error) {
 	return service.ModuleNotes{Notes: notes, Used: used, Total: total}, nil
 }
 
-func (a *app) SaveModuleESIMNote(note service.ModuleProfileNote) (service.ModuleNoteResult, error) {
+func (a *App) SaveModuleESIMNote(note service.ModuleProfileNote) (service.ModuleNoteResult, error) {
 	a.moduleNotesMu.Lock()
 	defer a.moduleNotesMu.Unlock()
 	notes, occupied, _, total, err := a.readModuleESIMNotes()
@@ -608,7 +609,7 @@ func (a *app) SaveModuleESIMNote(note service.ModuleProfileNote) (service.Module
 	return service.ModuleNoteResult{Message: "模块资料已保存", Index: &index}, nil
 }
 
-func (a *app) DownloadESIMProfile(ctx context.Context, request service.ESIMDownloadRequest) (service.ESIMDownloadResult, error) {
+func (a *App) DownloadESIMProfile(ctx context.Context, request service.ESIMDownloadRequest) (service.ESIMDownloadResult, error) {
 	esimManager, _ := a.currentESIMManager()
 	if !a.demo && esimManager == nil {
 		return service.ESIMDownloadResult{}, service.Fail(service.KindUnavailable, "eSIM manager is unavailable")
@@ -637,7 +638,7 @@ func (a *app) DownloadESIMProfile(ctx context.Context, request service.ESIMDownl
 	return service.ESIMDownloadResult{Result: &result}, nil
 }
 
-func (a *app) SwitchESIMProfile(ctx context.Context, iccid, aid string) (service.ESIMSwitchResult, error) {
+func (a *App) SwitchESIMProfile(ctx context.Context, iccid, aid string) (service.ESIMSwitchResult, error) {
 	esimManager, switchAllowed := a.currentESIMManager()
 	if !a.demo && esimManager == nil {
 		return service.ESIMSwitchResult{}, service.Fail(service.KindUnavailable, "eSIM manager is unavailable")
@@ -691,7 +692,7 @@ func (a *app) SwitchESIMProfile(ctx context.Context, iccid, aid string) (service
 	}, nil
 }
 
-func (a *app) RenameESIMProfile(iccid, aid, name string) (service.ESIMRenameResult, error) {
+func (a *App) RenameESIMProfile(iccid, aid, name string) (service.ESIMRenameResult, error) {
 	esimManager, _ := a.currentESIMManager()
 	if !a.demo && esimManager == nil {
 		return service.ESIMRenameResult{}, service.Fail(service.KindUnavailable, "eSIM manager is unavailable")
@@ -710,7 +711,7 @@ func (a *app) RenameESIMProfile(iccid, aid, name string) (service.ESIMRenameResu
 	return service.ESIMRenameResult{Message: "Profile 名称修改成功"}, nil
 }
 
-func (a *app) DeleteESIMProfile(iccid, aid string) (service.ESIMDeleteResult, error) {
+func (a *App) DeleteESIMProfile(iccid, aid string) (service.ESIMDeleteResult, error) {
 	esimManager, _ := a.currentESIMManager()
 	if !a.demo && esimManager == nil {
 		return service.ESIMDeleteResult{}, service.Fail(service.KindUnavailable, "eSIM manager is unavailable")
@@ -729,7 +730,7 @@ func (a *app) DeleteESIMProfile(iccid, aid string) (service.ESIMDeleteResult, er
 	return service.ESIMDeleteResult{Result: &result}, nil
 }
 
-func (a *app) ProbeESIMPhonebook() service.PhonebookProbe {
+func (a *App) ProbeESIMPhonebook() service.PhonebookProbe {
 	result := service.PhonebookProbe{Responses: make(map[string]string)}
 	if a.demo {
 		result.StorageSupported = true

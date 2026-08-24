@@ -5,15 +5,17 @@ package main
 import (
 	"errors"
 	"time"
+
+	"github.com/ab300819/DJOneHub/core"
 )
 
 // This build has no way to reach the module: the libusb transport needs cgo and
 // macOS. The stub exists so the platform-independent half of the program still
-// compiles and can be type-checked here, which is the point of ATTransport.
+// compiles and can be type-checked here, which is the point of core.ATTransport.
 
 type usbAT struct{}
 
-func openDJIUSBAT() (ATTransport, error) {
+func openDJIUSBAT() (core.ATTransport, error) {
 	return nil, errors.New("USB AT requires macOS cgo build with libusb")
 }
 
@@ -32,4 +34,4 @@ func (u *usbAT) Description() string {
 }
 
 // Compile-time proof that both implementations still match the interface.
-var _ ATTransport = (*usbAT)(nil)
+var _ core.ATTransport = (*usbAT)(nil)

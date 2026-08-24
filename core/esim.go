@@ -1,4 +1,4 @@
-package main
+package core
 
 import (
 	"encoding/base64"
@@ -13,7 +13,7 @@ import (
 	"time"
 )
 
-func (a *app) loadProfileNotesLocked() error {
+func (a *App) loadProfileNotesLocked() error {
 	if a.profileNotesLoaded {
 		return nil
 	}
@@ -48,7 +48,7 @@ func (a *app) loadProfileNotesLocked() error {
 	return nil
 }
 
-func (a *app) persistProfileNotesLocked() error {
+func (a *App) persistProfileNotesLocked() error {
 	if err := os.MkdirAll(filepath.Dir(a.profileNotesPath), 0o700); err != nil {
 		return fmt.Errorf("create profile notes directory: %w", err)
 	}
@@ -66,7 +66,7 @@ func (a *app) persistProfileNotesLocked() error {
 	return nil
 }
 
-func (a *app) phonebookProbeCommand(command string, result *phonebookProbeResult) bool {
+func (a *App) phonebookProbeCommand(command string, result *phonebookProbeResult) bool {
 	response, err := a.runATCommand(command, 6*time.Second)
 	if err != nil {
 		result.Responses[command] = err.Error()
@@ -143,7 +143,7 @@ func parseMEPhonebookEntries(response string) []modulePhonebookEntry {
 	return entries
 }
 
-func (a *app) readModuleESIMNotes() (map[string]moduleProfileNote, map[int]bool, int, int, error) {
+func (a *App) readModuleESIMNotes() (map[string]moduleProfileNote, map[int]bool, int, int, error) {
 	if _, err := a.runATOK(`AT+CPBS="ME"`, 6*time.Second); err != nil {
 		return nil, nil, 0, 0, err
 	}

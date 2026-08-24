@@ -1,4 +1,4 @@
-package main
+package core
 
 import (
 	"testing"
@@ -12,17 +12,17 @@ func TestATResponseCompleteRecognizesModemErrors(t *testing.T) {
 		"\r\n+CME ERROR: 30\r\n",
 		"\r\nERROR\r\n",
 	} {
-		if !atResponseComplete(response) {
-			t.Fatalf("atResponseComplete(%q) = false", response)
+		if !ATResponseComplete(response) {
+			t.Fatalf("ATResponseComplete(%q) = false", response)
 		}
 	}
 }
 
 func TestATResponseHasPrompt(t *testing.T) {
-	if !atResponseHasPrompt("AT+CMGS=23\r\n> ") {
+	if !ATResponseHasPrompt("AT+CMGS=23\r\n> ") {
 		t.Fatal("SMS prompt was not detected")
 	}
-	if atResponseHasPrompt("AT+CMGS=23\r\nOK\r\n") {
+	if ATResponseHasPrompt("AT+CMGS=23\r\nOK\r\n") {
 		t.Fatal("normal AT response was mistaken for a prompt")
 	}
 }

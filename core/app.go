@@ -1,4 +1,4 @@
-package main
+package core
 
 import (
 	"errors"
@@ -29,12 +29,13 @@ type modulePhonebookEntry struct {
 	Text   string
 }
 
-type app struct {
+type App struct {
 	modem             *modem.Manager
 	esimMu            sync.RWMutex
 	esim              *esim.Manager
 	esimSwitchAllowed bool
 	usbAT             ATTransport
+	openATTransport   func() (ATTransport, error)
 	host              HostProbe
 	port              string
 	demo              bool
@@ -64,10 +65,8 @@ type app struct {
 	eventSink EventSink
 
 	trafficMu        sync.Mutex
-	trafficBaselines map[string]networkByteCounters
+	trafficBaselines map[string]NetworkByteCounters
 }
-
-type usbInterfaceStatus = service.USBInterface
 
 // These live in internal/service so every transport shares one definition;
 // the aliases keep the existing call sites in this file unchanged.
@@ -79,12 +78,12 @@ type macNetInterface = service.MacNetInterface
 
 type macDefaultRoute = service.MacDefaultRoute
 
-type networkByteCounters struct {
+type NetworkByteCounters struct {
 	RX uint64
 	TX uint64
 }
 
-func (a *app) initUSBATESIMManager() {
+func (a *App) InitUSBATESIMManager() {
 	if manager, _ := a.currentESIMManager(); manager != nil {
 		return
 	}
@@ -99,18 +98,18 @@ func (a *app) initUSBATESIMManager() {
 		log.Printf("eSIM manager unavailable over USB AT: %v", err)
 		return
 	}
-	if a.installESIMManager(esimManager, true) {
+	if a.InstallESIMManager(esimManager, true) {
 		log.Printf("eSIM manager is available over USB AT with profile switching enabled")
 	}
 }
 
-func (a *app) currentESIMManager() (*esim.Manager, bool) {
+func (a *App) currentESIMManager() (*esim.Manager, bool) {
 	a.esimMu.RLock()
 	defer a.esimMu.RUnlock()
 	return a.esim, a.esimSwitchAllowed
 }
 
-func (a *app) installESIMManager(manager *esim.Manager, switchAllowed bool) bool {
+func (a *App) InstallESIMManager(manager *esim.Manager, switchAllowed bool) bool {
 	if manager == nil {
 		return false
 	}
@@ -124,9 +123,58 @@ func (a *app) installESIMManager(manager *esim.Manager, switchAllowed bool) bool
 	return true
 }
 
-func newDemoApp(host HostProbe) *app {
+// Options is what a host supplies to build a core. Everything in it is
+// optional: a core with no transport and no probe reports an absent module
+// rather than failing, which is the state the UI shows before anything is
+// plugged in.
+type Options struct {
+	// Modem drives the module over a serial AT port, when the host found one.
+	Modem *modem.Manager
+	// Host answers questions about the machine. Supply one; the fallback
+	// reports an absent machine.
+	Host HostProbe
+	// ATTransport drives the module over USB, used when there is no serial port.
+	ATTransport ATTransport
+	// OpenATTransport reopens the USB transport. A module can be unplugged and
+	// plugged back in, and reopening it is a platform capability, so the core
+	// is handed the means rather than knowing how. Without it a lost transport
+	// stays lost until the process restarts.
+	OpenATTransport func() (ATTransport, error)
+	// Port names the channel in use, for the UI and the logs.
+	Port string
+	// DiscoveryError explains why no module was found, when none was.
+	DiscoveryError string
+	// USBDevice is the module as the host's USB inventory sees it.
+	USBDevice *usbDeviceStatus
+}
+
+// New builds a core. The SMS polling defaults live here rather than at the call
+// sites that used to repeat them.
+func New(opts Options) *App {
+	return &App{
+		modem:            opts.Modem,
+		host:             opts.Host,
+		usbAT:            opts.ATTransport,
+		openATTransport:  opts.OpenATTransport,
+		port:             opts.Port,
+		discoveryError:   opts.DiscoveryError,
+		usbDevice:        opts.USBDevice,
+		smsPollInterval:  8 * time.Second,
+		smsAutoCleanupME: true,
+		smsReassembler:   smscodec.NewReassembler(),
+	}
+}
+
+// SetPort records the channel the module was reached on, once a transport that
+// opened lazily can name it.
+func (a *App) SetPort(port string) {
+	a.port = port
+	a.discoveryError = ""
+}
+
+func NewDemo(host HostProbe) *App {
 	now := time.Now()
-	return &app{
+	return &App{
 		demo:            true,
 		host:            host,
 		port:            "Demo · Quectel EG25-G",
@@ -147,7 +195,7 @@ func newDemoApp(host HostProbe) *app {
 	}
 }
 
-func (a *app) ensureUSBAT() error {
+func (a *App) ensureUSBAT() error {
 	if a.demo || a.modem != nil || a.usbAT != nil {
 		return nil
 	}
@@ -162,7 +210,10 @@ func (a *app) ensureUSBAT() error {
 		}
 		return errors.New("USB AT is cooling down after disconnect")
 	}
-	dev, err := openDJIUSBAT()
+	if a.openATTransport == nil {
+		return errors.New("this build cannot open a USB AT transport")
+	}
+	dev, err := a.openATTransport()
 	if err != nil {
 		return err
 	}
@@ -174,11 +225,11 @@ func (a *app) ensureUSBAT() error {
 	log.Printf("USB AT bridge opened on DJI %s", dev.Description())
 	// The first open may fail while USB is re-enumerating. When a later poll
 	// succeeds, rebuild the eSIM service that startup could not create.
-	a.initUSBATESIMManager()
+	a.InitUSBATESIMManager()
 	return nil
 }
 
-func (a *app) resetUSBATIfGone(err error) {
+func (a *App) resetUSBATIfGone(err error) {
 	if err == nil || a.usbAT == nil {
 		return
 	}
@@ -193,7 +244,7 @@ func (a *app) resetUSBATIfGone(err error) {
 
 // markUSBATDetached clears state belonging to a physically removed module.
 // A later status/SMS poll will discover and open a newly connected module.
-func (a *app) markUSBATDetached(reason string) {
+func (a *App) markUSBATDetached(reason string) {
 	if a.usbAT != nil {
 		log.Printf("USB AT bridge detached; waiting for a new enumeration: %s", reason)
 		a.usbAT.Close()
@@ -209,7 +260,7 @@ func (a *app) markUSBATDetached(reason string) {
 	}
 }
 
-func (a *app) currentUSBDevice() *usbDeviceStatus {
+func (a *App) currentUSBDevice() *usbDeviceStatus {
 	if a.modem != nil || a.demo {
 		return a.usbDevice
 	}

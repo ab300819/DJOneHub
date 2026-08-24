@@ -8,8 +8,14 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/ab300819/DJOneHub/core"
 	"github.com/ab300819/DJOneHub/internal/service"
 )
+
+// Readers for what the macOS command-line tools print: ioreg's property
+// blocks, ifconfig's stanzas, nettop's CSV, netstat's columns. Text handling
+// only, so it stays out of the _darwin.go file that shells out and can be
+// tested on any platform.
 
 func portScore(port string) int {
 	name := strings.ToLower(port)
@@ -25,7 +31,7 @@ func portScore(port string) int {
 	return 0
 }
 
-func allVendorSpecific(interfaces []usbInterfaceStatus) bool {
+func allVendorSpecific(interfaces []service.USBInterface) bool {
 	if len(interfaces) == 0 {
 		return false
 	}
@@ -87,12 +93,6 @@ func usbSpeedName(speed int) string {
 	}
 }
 
-func sessionTrafficFromCounters(current, baseline networkByteCounters) (rx, tx, total uint64) {
-	rx = current.RX - baseline.RX
-	tx = current.TX - baseline.TX
-	return rx, tx, rx + tx
-}
-
 func splitIfconfigBlocks(out string) []string {
 	var blocks []string
 	var current []string
@@ -128,30 +128,6 @@ func classifyMacInterfaceName(name string) string {
 	default:
 		return "other"
 	}
-}
-
-// hasUSBNetworkInterface reports whether the module has an interface of its own
-// that is up. Any other interface being up says nothing about the module.
-func hasUSBNetworkInterface(interfaces []macNetInterface, moduleInterface string) bool {
-	return selectUSBTrafficInterface(interfaces, moduleInterface) != ""
-}
-
-// selectUSBTrafficInterface returns the module's interface, and only that.
-//
-// It used to fall back to "any active ethernet that is not en0", which reported
-// whatever NIC happened to be up — on a machine where en0 is wired and Wi-Fi is
-// en1, that meant presenting the user's Wi-Fi traffic as the module's. Reporting
-// nothing is the correct answer when the module has no interface.
-func selectUSBTrafficInterface(interfaces []macNetInterface, moduleInterface string) string {
-	if moduleInterface == "" {
-		return ""
-	}
-	for _, item := range interfaces {
-		if item.Name == moduleInterface && item.Status == "active" {
-			return item.Name
-		}
-	}
-	return ""
 }
 
 // nettopProcessSuffix strips the pid that nettop appends to a process name.
@@ -230,8 +206,8 @@ func parseNettopFlow(description string) (protocol, host, port string) {
 	return protocol, strings.Trim(remote, "[]"), ""
 }
 
-func parseMacInterfaceCounters(out string) map[string]networkByteCounters {
-	counters := make(map[string]networkByteCounters)
+func parseMacInterfaceCounters(out string) map[string]core.NetworkByteCounters {
+	counters := make(map[string]core.NetworkByteCounters)
 	for _, line := range strings.Split(out, "\n") {
 		fields := strings.Fields(line)
 		if len(fields) < 10 || !strings.HasPrefix(fields[2], "<Link#") {
@@ -243,7 +219,7 @@ func parseMacInterfaceCounters(out string) map[string]networkByteCounters {
 		if name == "" || rxErr != nil || txErr != nil {
 			continue
 		}
-		counters[name] = networkByteCounters{RX: rx, TX: tx}
+		counters[name] = core.NetworkByteCounters{RX: rx, TX: tx}
 	}
 	return counters
 }

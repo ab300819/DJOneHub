@@ -1,4 +1,4 @@
-package main
+package core
 
 import (
 	"context"
@@ -15,13 +15,13 @@ import (
 	"github.com/ab300819/DJOneHub/pkg/smscodec"
 )
 
-func (a *app) recordSMS(sender, content string, timestamp time.Time) {
+func (a *App) RecordSMS(sender, content string, timestamp time.Time) {
 	a.mergeSMS([]receivedSMS{{
 		Sender: sender, Content: content, Timestamp: timestamp,
 	}})
 }
 
-func (a *app) mergeSMS(messages []receivedSMS) (newCount int, total int) {
+func (a *App) mergeSMS(messages []receivedSMS) (newCount int, total int) {
 	a.smsMu.Lock()
 	defer a.smsMu.Unlock()
 	seen := make(map[string]bool, len(a.sms)+len(messages))
@@ -53,7 +53,7 @@ func smsCacheKey(item receivedSMS) string {
 	return item.Sender + "\x00" + item.Content + "\x00" + item.Timestamp.Format(time.RFC3339Nano)
 }
 
-func (a *app) setSMSPollStatus(err error) {
+func (a *App) setSMSPollStatus(err error) {
 	a.smsMu.Lock()
 	defer a.smsMu.Unlock()
 	a.smsLastPoll = time.Now()
@@ -64,7 +64,7 @@ func (a *app) setSMSPollStatus(err error) {
 	a.smsLastPollError = ""
 }
 
-func (a *app) startSMSPoller(ctx context.Context) {
+func (a *App) StartSMSPoller(ctx context.Context) {
 	interval := a.smsPollInterval
 	if interval <= 0 {
 		interval = 8 * time.Second
@@ -84,7 +84,7 @@ func (a *app) startSMSPoller(ctx context.Context) {
 	}
 }
 
-func (a *app) pollSMSOnce() error {
+func (a *App) pollSMSOnce() error {
 	if a.demo || a.modem != nil {
 		return nil
 	}
@@ -114,7 +114,7 @@ func (a *app) pollSMSOnce() error {
 	return nil
 }
 
-func (a *app) readUSBATSMS() ([]receivedSMS, error) {
+func (a *App) readUSBATSMS() ([]receivedSMS, error) {
 	if _, err := a.usbAT.Command("AT+CMGF=0", 3*time.Second); err != nil {
 		return nil, fmt.Errorf("set SMS PDU mode: %w", err)
 	}
@@ -146,7 +146,7 @@ func (a *app) readUSBATSMS() ([]receivedSMS, error) {
 	return messages, nil
 }
 
-func (a *app) readUSBATSMSFromMemory(memory string) ([]receivedSMS, error) {
+func (a *App) readUSBATSMSFromMemory(memory string) ([]receivedSMS, error) {
 	if _, err := a.usbAT.Command(fmt.Sprintf(`AT+CPMS="%s","%s","%s"`, memory, memory, memory), 5*time.Second); err != nil {
 		return nil, fmt.Errorf("select storage: %w", err)
 	}
@@ -188,7 +188,7 @@ func (a *app) readUSBATSMSFromMemory(memory string) ([]receivedSMS, error) {
 	return messages, nil
 }
 
-func (a *app) clearUSBATSMSMemory(memory string) (before, after int, err error) {
+func (a *App) clearUSBATSMSMemory(memory string) (before, after int, err error) {
 	resp, err := a.usbAT.Command(fmt.Sprintf(`AT+CPMS="%s","%s","%s"`, memory, memory, memory), 5*time.Second)
 	if err != nil {
 		return 0, 0, fmt.Errorf("select storage: %w", err)
@@ -268,7 +268,7 @@ func decodeUSBATPDU(header, pduHex string) (receivedSMS, smscodec.ConcatInfo, er
 	return receivedSMS{Sender: sender, Content: content, Timestamp: timestamp}, concat, nil
 }
 
-func (a *app) sendTextSMS(phone, message string) (int, error) {
+func (a *App) sendTextSMS(phone, message string) (int, error) {
 	if a.modem == nil {
 		return a.sendUSBATSMS(phone, message)
 	}
@@ -278,7 +278,7 @@ func (a *app) sendTextSMS(phone, message string) (int, error) {
 	return 1, nil
 }
 
-func (a *app) sendUSBATSMS(phone, message string) (int, error) {
+func (a *App) sendUSBATSMS(phone, message string) (int, error) {
 	a.smsSendMu.Lock()
 	defer a.smsSendMu.Unlock()
 
@@ -294,7 +294,7 @@ func (a *app) sendUSBATSMS(phone, message string) (int, error) {
 		a.resetUSBATIfGone(err)
 		return 0, fmt.Errorf("set SMS PDU mode: %w", err)
 	}
-	if !atProbeSucceeded(modeResponse) {
+	if !ATProbeSucceeded(modeResponse) {
 		return 0, fmt.Errorf("set SMS PDU mode failed: %s", modeResponse)
 	}
 
@@ -314,7 +314,7 @@ func (a *app) sendUSBATSMS(phone, message string) (int, error) {
 			a.resetUSBATIfGone(sendErr)
 			return i, fmt.Errorf("send SMS segment %d/%d: %w", i+1, len(tpdus), sendErr)
 		}
-		if atResponseIsError(response) || !strings.Contains(response, "+CMGS:") || !atProbeSucceeded(response) {
+		if ATResponseIsError(response) || !strings.Contains(response, "+CMGS:") || !ATProbeSucceeded(response) {
 			return i, fmt.Errorf("send SMS segment %d/%d failed: %s", i+1, len(tpdus), response)
 		}
 		if i+1 < len(tpdus) {

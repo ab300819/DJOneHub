@@ -1,4 +1,4 @@
-package main
+package core
 
 import (
 	"errors"
@@ -73,7 +73,7 @@ func moduleResponses() map[string]string {
 
 func TestUSBATStatusParsesAModuleAnswer(t *testing.T) {
 	transport := &fakeATTransport{responses: moduleResponses()}
-	instance := &app{usbAT: transport}
+	instance := &App{usbAT: transport}
 
 	status, err := instance.usbATStatus()
 	if err != nil {
@@ -128,7 +128,7 @@ func TestUSBATStatusFailsOnlyWhenCPINFails(t *testing.T) {
 		responses: moduleResponses(),
 		errs:      map[string]error{"AT+CPIN?": errors.New("USB AT command timed out")},
 	}
-	instance := &app{usbAT: transport}
+	instance := &App{usbAT: transport}
 
 	if _, err := instance.usbATStatus(); err == nil {
 		t.Fatal("usbATStatus() succeeded despite a failing AT+CPIN?")
@@ -138,7 +138,7 @@ func TestUSBATStatusFailsOnlyWhenCPINFails(t *testing.T) {
 		responses: moduleResponses(),
 		errs:      map[string]error{"AT+QNWINFO": errors.New("USB AT command timed out")},
 	}
-	instance = &app{usbAT: transport}
+	instance = &App{usbAT: transport}
 	status, err := instance.usbATStatus()
 	if err != nil {
 		t.Fatalf("a failing AT+QNWINFO should not abort the status read: %v", err)
@@ -158,7 +158,7 @@ func TestRunATCommandDropsTheTransportWhenTheModuleIsGone(t *testing.T) {
 		responses: map[string]string{},
 		errs:      map[string]error{"ATI": errors.New("USB bulk write: LIBUSB_ERROR_NO_DEVICE")},
 	}
-	instance := &app{usbAT: transport, usbDevice: &usbDeviceStatus{}}
+	instance := &App{usbAT: transport, usbDevice: &usbDeviceStatus{}}
 
 	if _, err := instance.runATCommand("ATI", time.Second); err == nil {
 		t.Fatal("runATCommand() succeeded despite NO_DEVICE")
@@ -176,7 +176,7 @@ func TestRunATCommandKeepsTheTransportOnAnOrdinaryError(t *testing.T) {
 	transport := &fakeATTransport{
 		responses: map[string]string{"AT+BOGUS": "ERROR"},
 	}
-	instance := &app{usbAT: transport, usbDevice: &usbDeviceStatus{}}
+	instance := &App{usbAT: transport, usbDevice: &usbDeviceStatus{}}
 
 	if _, err := instance.runATCommand("AT+BOGUS", time.Second); err != nil {
 		t.Fatalf("an ERROR answer is not a transport failure: %v", err)
@@ -195,7 +195,7 @@ func TestSendUSBATSMSSubmitsOnePDUPerSegment(t *testing.T) {
 			"AT+CMGS=16": "+CMGS: 42\r\n\r\nOK",
 		},
 	}
-	instance := &app{usbAT: transport, usbDevice: &usbDeviceStatus{}}
+	instance := &App{usbAT: transport, usbDevice: &usbDeviceStatus{}}
 
 	sent, err := instance.sendUSBATSMS("+8613800138000", "hi")
 	if err != nil {
@@ -223,7 +223,7 @@ func TestSendUSBATSMSSplitsALongMessage(t *testing.T) {
 		responses:   map[string]string{"AT+CMGF=0": "OK"},
 		promptReply: "+CMGS: 42\r\n\r\nOK",
 	}
-	instance := &app{usbAT: transport, usbDevice: &usbDeviceStatus{}}
+	instance := &App{usbAT: transport, usbDevice: &usbDeviceStatus{}}
 
 	sent, err := instance.sendUSBATSMS("+8613800138000", strings.Repeat("a", 200))
 	if err != nil {
@@ -239,7 +239,7 @@ func TestSendUSBATSMSSplitsALongMessage(t *testing.T) {
 
 func TestSendUSBATSMSReportsARefusedPDUMode(t *testing.T) {
 	transport := &fakeATTransport{responses: map[string]string{"AT+CMGF=0": "ERROR"}}
-	instance := &app{usbAT: transport, usbDevice: &usbDeviceStatus{}}
+	instance := &App{usbAT: transport, usbDevice: &usbDeviceStatus{}}
 
 	if _, err := instance.sendUSBATSMS("+8613800138000", "hi"); err == nil {
 		t.Fatal("sendUSBATSMS() succeeded although the module refused PDU mode")

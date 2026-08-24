@@ -106,20 +106,47 @@ demo 模式的状态是硬编码字面量，不走这条路径，所以护栏看
 
 ## 待做
 
-### 第三趟：搬包
+**第三趟：搬包**
 
-依赖方向已经正确，位置就没有歧义了。两个接口的实现函数目前还留在 `main.go`
-里（`discoverMac*` 一族、`parseNettopActivity`、libusb 那套），这一趟把它们搬走：
+先在原地按职责把 2007 行的 `main.go` 切成八个文件（零改名、零 import 变动），
+再切包。分两步是因为第一步的正确性能被"diff 只是移动"直接看出来。
 
 ```
-core/              可导入的库包（AT 协议 / SMS / eSIM / service 实现 / dispatch）
-platform/darwin/   libusb + ioreg/ifconfig/nettop 实现
-cmd/djonehub/      B/S：HTTP + 内嵌 web UI
-mobile/            C/S：gomobile bind 入口
-clib/              C/S：c-archive 入口（package main + //export）
+core/                      3475 行  AT 协议 / SMS / eSIM / service 实现 / dispatch
+cmd/djonehub-macos/        1723 行  HTTP + 内嵌 web UI + stdio + libusb + macOS 探测
 ```
 
-### 第四趟：Android
+`core` 对外只有 19 个符号：`New` / `NewDemo` / `Options` / `App` / `Call` /
+`Request` / `Response` / `Event` / `EventSink` / `ATTransport` / `HostProbe` /
+`UnsupportedHost` / `NetworkByteCounters` 加 5 个 AT 应答判定函数。其余一律不导出
+——这正是划边界的目的。
+
+三处设计决定：
+
+- **HTTP 层只依赖 `service.Service`**。27 个处理器里有 26 个本来就只调接口方法，
+  补上 `RenameESIMProfile` 之后是 27/27，于是 `server` 结构体只持有一个接口值，
+  core 不必是 HTTP 服务器也能用。
+- **`Options.OpenATTransport` 注入重开能力**。模块可以拔掉再插上，重开是平台
+  能力，所以 core 拿到手段而不是知道办法——否则 core 就得调用 `openDJIUSBAT`，
+  依赖方向立刻反过来。
+- **解析与执行分家**。读 nettop 的 CSV 是任何平台都能做的文本处理，运行 nettop
+  是 macOS。`hostprobe_parse.go`（238 行，无构建标签）与
+  `hostprobe_exec_darwin.go`（186 行）因此分开，非 darwin 构建才编得过。
+
+### 第三趟剩余：`platform/darwin/`
+
+libusb 与 macOS 探测目前仍在 `cmd/djonehub-macos/` 内。macOS 的 c-archive 产物
+若要复用它们，得先搬成可导入的包。
+
+### 已知限制
+
+`core.Call` 的签名里有 `service.Service`，而 `service` 在 `internal/` 下，
+所以模块外部的使用者无法实现这个接口。模块内的 `mobile/` 和 `clib/` 不受影响
+（它们跨边界传 JSON 字符串），真要对外开放库再把 `service` 移出 `internal/`。
+
+### 第四趟：搬完之后
+
+### Android
 
 本机 gomobile、Android SDK/NDK **均未安装**，开工前需先装工具链。
 Android App 作为第三个子模块 `DJOneHubDroid`（Kotlin / Gradle / Compose）。

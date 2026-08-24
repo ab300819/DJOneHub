@@ -1,4 +1,4 @@
-package main
+package core
 
 import (
 	"strings"
@@ -35,14 +35,14 @@ type ATTransport interface {
 // device access, which is why it belongs on this side of the seam rather than
 // in the libusb implementation that happened to be its first caller.
 
-func atResponseComplete(resp string) bool {
+func ATResponseComplete(resp string) bool {
 	normalized := strings.ReplaceAll(resp, "\r\n", "\n")
 	return strings.Contains(normalized, "\nOK\n") ||
 		strings.HasSuffix(normalized, "\nOK") ||
-		atResponseIsError(normalized)
+		ATResponseIsError(normalized)
 }
 
-func atResponseIsError(resp string) bool {
+func ATResponseIsError(resp string) bool {
 	normalized := strings.ToUpper(strings.ReplaceAll(resp, "\r\n", "\n"))
 	return strings.Contains(normalized, "\nERROR\n") ||
 		strings.HasSuffix(normalized, "\nERROR") ||
@@ -50,19 +50,19 @@ func atResponseIsError(resp string) bool {
 		strings.Contains(normalized, "+CMS ERROR:")
 }
 
-func atResponseHasPrompt(resp string) bool {
+func ATResponseHasPrompt(resp string) bool {
 	trimmed := strings.TrimRight(resp, " \t\r\n")
 	return strings.HasSuffix(trimmed, ">")
 }
 
 // A probe must receive OK. ERROR merely proves that a bulk interface accepted
 // bytes; it is not the modem's AT channel (the QMI interface can do that).
-func atProbeSucceeded(resp string) bool {
+func ATProbeSucceeded(resp string) bool {
 	normalized := strings.ReplaceAll(strings.TrimSpace(resp), "\r\n", "\n")
 	return normalized == "OK" || strings.HasSuffix(normalized, "\nOK")
 }
 
-func normalizeATResponse(resp string) string {
+func NormalizeATResponse(resp string) string {
 	resp = strings.ReplaceAll(resp, "\r\r\n", "\r\n")
 	resp = strings.TrimSpace(resp)
 	lines := strings.Split(resp, "\n")

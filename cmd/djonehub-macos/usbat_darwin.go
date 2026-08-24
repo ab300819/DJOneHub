@@ -16,6 +16,8 @@ import (
 	"sync"
 	"time"
 	"unsafe"
+
+	"github.com/ab300819/DJOneHub/core"
 )
 
 const (
@@ -43,7 +45,7 @@ type usbATCandidate struct {
 	endpointOut byte
 }
 
-func openDJIUSBAT() (ATTransport, error) {
+func openDJIUSBAT() (core.ATTransport, error) {
 	var ctx *C.libusb_context
 	if rc := C.libusb_init(&ctx); rc != 0 {
 		return nil, fmt.Errorf("libusb init: %s", usbErrorName(rc))
@@ -79,7 +81,7 @@ func openDJIUSBAT() (ATTransport, error) {
 			endpointIn:  candidate.endpointIn,
 			endpointOut: candidate.endpointOut,
 		}
-		if response, err := dev.Command("AT", 900*time.Millisecond); err == nil && atProbeSucceeded(response) {
+		if response, err := dev.Command("AT", 900*time.Millisecond); err == nil && core.ATProbeSucceeded(response) {
 			return dev, nil
 		} else {
 			if err == nil {
@@ -202,14 +204,14 @@ func (u *usbAT) Command(cmd string, timeout time.Duration) (string, error) {
 		}
 		chunks = append(chunks, string(data))
 		joined := strings.Join(chunks, "")
-		if atResponseComplete(joined) {
-			return normalizeATResponse(joined), nil
+		if core.ATResponseComplete(joined) {
+			return core.NormalizeATResponse(joined), nil
 		}
 	}
 	if len(chunks) == 0 {
 		return "", errors.New("USB AT command timed out without response")
 	}
-	return normalizeATResponse(strings.Join(chunks, "")), nil
+	return core.NormalizeATResponse(strings.Join(chunks, "")), nil
 }
 
 // CommandWithPrompt executes an AT command that enters an interactive input
@@ -256,7 +258,7 @@ func (u *usbAT) CommandWithPrompt(cmd string, followUp []byte, timeout time.Dura
 			if errors.Is(err, errUSBTimeout) {
 				continue
 			}
-			return normalizeATResponse(response.String()), err
+			return core.NormalizeATResponse(response.String()), err
 		}
 		if len(data) == 0 {
 			continue
@@ -265,21 +267,21 @@ func (u *usbAT) CommandWithPrompt(cmd string, followUp []byte, timeout time.Dura
 		joined := response.String()
 
 		if !promptReceived {
-			if atResponseIsError(joined) {
-				return normalizeATResponse(joined), nil
+			if core.ATResponseIsError(joined) {
+				return core.NormalizeATResponse(joined), nil
 			}
-			if !atResponseHasPrompt(joined) {
+			if !core.ATResponseHasPrompt(joined) {
 				continue
 			}
 			if err := u.bulkWriteLocked(u.endpointOut, followUp, time.Until(deadline)); err != nil {
-				return normalizeATResponse(joined), err
+				return core.NormalizeATResponse(joined), err
 			}
 			promptReceived = true
 			continue
 		}
 
-		if atResponseComplete(joined) {
-			return normalizeATResponse(joined), nil
+		if core.ATResponseComplete(joined) {
+			return core.NormalizeATResponse(joined), nil
 		}
 	}
 
@@ -290,7 +292,7 @@ func (u *usbAT) CommandWithPrompt(cmd string, followUp []byte, timeout time.Dura
 	if response.Len() == 0 {
 		return "", errors.New("USB interactive AT command timed out without response")
 	}
-	return normalizeATResponse(response.String()), errors.New("USB interactive AT command timed out before completion")
+	return core.NormalizeATResponse(response.String()), errors.New("USB interactive AT command timed out before completion")
 }
 
 var errUSBTimeout = errors.New("usb timeout")
@@ -356,4 +358,4 @@ func usbErrorName(rc C.int) string {
 }
 
 // Compile-time proof that the libusb transport still matches the interface.
-var _ ATTransport = (*usbAT)(nil)
+var _ core.ATTransport = (*usbAT)(nil)

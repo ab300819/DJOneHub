@@ -3,7 +3,7 @@
 GO      ?= go
 VERSION ?= dev
 ARCH    ?= $(shell uname -m)
-PKGS    := ./cmd/... ./internal/... ./pkg/...
+PKGS    := ./cmd/... ./core/... ./internal/... ./pkg/...
 
 .PHONY: help
 help: ## 列出可用目标

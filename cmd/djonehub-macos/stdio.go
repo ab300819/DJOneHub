@@ -9,13 +9,14 @@ import (
 	"os"
 	"sync"
 
+	"github.com/ab300819/DJOneHub/core"
 	"golang.org/x/sys/unix"
 )
 
 // The stdio bridge speaks line-delimited JSON over the process's own pipes,
 // which is how the native macOS app drives the core. Unlike the HTTP server it
 // opens no socket, so nothing on the machine but the parent process can reach
-// it. It is a thin loop over Call: read a frame, hand it over, write the answer.
+// it. It is a thin loop over core.Call: read a frame, hand it over, write the answer.
 
 // stdioSink pushes events onto the same stream the responses travel on. Frames
 // are distinguished by shape rather than by channel: a response carries "id", an
@@ -25,7 +26,7 @@ type stdioSink struct {
 	out *os.File
 }
 
-func (s stdioSink) Emit(event Event) {
+func (s stdioSink) Emit(event core.Event) {
 	encoded, err := json.Marshal(event)
 	if err != nil {
 		log.Printf("stdio: event could not be encoded: %v", err)
@@ -38,7 +39,7 @@ func (s stdioSink) Emit(event Event) {
 	}
 }
 
-func serveStdio(instance *app) {
+func serveStdio(instance *core.App) {
 	out, err := claimStdout()
 	if err != nil {
 		log.Printf("stdio: %v", err)
@@ -62,7 +63,7 @@ func serveStdio(instance *app) {
 		if len(line) == 0 {
 			continue
 		}
-		response := Call(instance, line)
+		response := core.Call(instance, line)
 
 		writeMu.Lock()
 		_, writeErr := out.Write(append(response, '\n'))

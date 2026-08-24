@@ -11,7 +11,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ab300819/DJOneHub/core"
 	"github.com/ab300819/DJOneHub/internal/modem"
+	"github.com/ab300819/DJOneHub/internal/service"
 )
 
 func discoverATPort() (string, error) {
@@ -44,13 +46,13 @@ func discoverATPort() (string, error) {
 	return "", fmt.Errorf("no AT-capable port found among %s", strings.Join(attempted, ", "))
 }
 
-func discoverDJIUSBDevice() *usbDeviceStatus {
+func discoverDJIUSBDevice() *service.USBDevice {
 	out, err := exec.Command("ioreg", "-r", "-c", "IOUSBHostInterface", "-l", "-w", "0").Output()
 	if err != nil {
 		return nil
 	}
 
-	var device *usbDeviceStatus
+	var device *service.USBDevice
 	for _, block := range strings.Split(string(out), "\n\n") {
 		vendorID, okVendor := intProperty(block, "idVendor")
 		productID, okProduct := intProperty(block, "idProduct")
@@ -58,7 +60,7 @@ func discoverDJIUSBDevice() *usbDeviceStatus {
 			continue
 		}
 		if device == nil {
-			device = &usbDeviceStatus{
+			device = &service.USBDevice{
 				Product:    stringProperty(block, "USB Product Name"),
 				Vendor:     stringProperty(block, "USB Vendor Name"),
 				VendorID:   fmt.Sprintf("%04x", vendorID),
@@ -78,7 +80,7 @@ func discoverDJIUSBDevice() *usbDeviceStatus {
 		if !okIface {
 			continue
 		}
-		iface := usbInterfaceStatus{
+		iface := service.USBInterface{
 			Number:    ifaceNumber,
 			Class:     intPropertyOrZero(block, "bInterfaceClass"),
 			Subclass:  intPropertyOrZero(block, "bInterfaceSubClass"),
@@ -99,12 +101,12 @@ func discoverDJIUSBDevice() *usbDeviceStatus {
 	return device
 }
 
-func discoverMacNetworkInterfaces() []macNetInterface {
+func discoverMacNetworkInterfaces() []service.MacNetInterface {
 	out, err := exec.Command("ifconfig").Output()
 	if err != nil {
 		return nil
 	}
-	var interfaces []macNetInterface
+	var interfaces []service.MacNetInterface
 	for _, block := range splitIfconfigBlocks(string(out)) {
 		block = strings.TrimSpace(block)
 		if block == "" {
@@ -122,7 +124,7 @@ func discoverMacNetworkInterfaces() []macNetInterface {
 		if name == "" || strings.HasPrefix(name, "lo") || strings.HasPrefix(name, "utun") {
 			continue
 		}
-		item := macNetInterface{Name: name, Status: "unknown", Kind: classifyMacInterfaceName(name)}
+		item := service.MacNetInterface{Name: name, Status: "unknown", Kind: classifyMacInterfaceName(name)}
 		for _, line := range lines {
 			line = strings.TrimSpace(line)
 			if strings.HasPrefix(line, "status:") {
@@ -140,12 +142,12 @@ func discoverMacNetworkInterfaces() []macNetInterface {
 	return interfaces
 }
 
-func discoverMacDefaultRoute() macDefaultRoute {
+func discoverMacDefaultRoute() service.MacDefaultRoute {
 	out, err := exec.Command("route", "-n", "get", "default").Output()
 	if err != nil {
-		return macDefaultRoute{}
+		return service.MacDefaultRoute{}
 	}
-	var route macDefaultRoute
+	var route service.MacDefaultRoute
 	for _, line := range strings.Split(string(out), "\n") {
 		line = strings.TrimSpace(line)
 		if strings.HasPrefix(line, "gateway:") {
@@ -158,7 +160,7 @@ func discoverMacDefaultRoute() macDefaultRoute {
 	return route
 }
 
-func discoverMacInterfaceCounters() (map[string]networkByteCounters, error) {
+func discoverMacInterfaceCounters() (map[string]core.NetworkByteCounters, error) {
 	out, err := exec.Command("netstat", "-ibn").Output()
 	if err != nil {
 		return nil, err
