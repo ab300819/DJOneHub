@@ -749,6 +749,8 @@ func (a *app) usbATStatus() (modem.DeviceStatus, error) {
 	cimiResp, _ := a.usbAT.Command("AT+CIMI", 3*time.Second)
 	qnwinfoResp, _ := a.usbAT.Command("AT+QNWINFO", 3*time.Second)
 	usbnetResp, _ := a.usbAT.Command(`AT+QCFG="usbnet"`, 3*time.Second)
+	cgsnResp, _ := a.usbAT.Command("AT+CGSN", 3*time.Second)
+	cgattResp, _ := a.usbAT.Command("AT+CGATT?", 3*time.Second)
 
 	if cpinErr != nil {
 		return modem.DeviceStatus{}, cpinErr
@@ -762,8 +764,10 @@ func (a *app) usbATStatus() (modem.DeviceStatus, error) {
 	}
 	status := modem.DeviceStatus{
 		Firmware:      parseUSBATFirmware(firmwareResp),
+		IMEI:          parseUSBATBareDigits(cgsnResp),
 		ICCID:         parseUSBATPrefixed(qccidResp, "+QCCID:"),
-		IMSI:          parseUSBATIMSI(cimiResp),
+		IMSI:          parseUSBATBareDigits(cimiResp),
+		PSAttached:    parseUSBATCGATT(cgattResp),
 		Operator:      parseUSBATOperator(copsResp),
 		SimInserted:   strings.Contains(strings.ToUpper(cpinResp), "READY"),
 		SignalDBM:     parseUSBATCSQDBM(csqResp),
@@ -816,7 +820,7 @@ func parseUSBATPrefixed(resp, prefix string) string {
 	return ""
 }
 
-func parseUSBATIMSI(resp string) string {
+func parseUSBATBareDigits(resp string) string {
 	for _, line := range splitATLines(resp) {
 		up := strings.ToUpper(line)
 		if up == "OK" || strings.HasPrefix(up, "AT") {
@@ -827,6 +831,15 @@ func parseUSBATIMSI(resp string) string {
 		}
 	}
 	return ""
+}
+
+// parseUSBATCGATT reports whether the module is attached to the packet-switched
+// service. A registered module is not necessarily attached, and the status view
+// used to report "not attached" unconditionally because nothing asked.
+func parseUSBATCGATT(resp string) bool {
+	re := regexp.MustCompile(`\+CGATT:\s*(\d+)`)
+	match := re.FindStringSubmatch(resp)
+	return len(match) == 2 && match[1] == "1"
 }
 
 func parseUSBATCSQDBM(resp string) int {

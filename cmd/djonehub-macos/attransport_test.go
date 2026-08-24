@@ -66,6 +66,8 @@ func moduleResponses() map[string]string {
 		"AT+CIMI":          "460019876543210\r\n\r\nOK",
 		"AT+QNWINFO":       "+QNWINFO: \"FDD LTE\",\"46001\",\"LTE BAND 3\",1650\r\n\r\nOK",
 		`AT+QCFG="usbnet"`: "+QCFG: \"usbnet\",1\r\n\r\nOK",
+		"AT+CGSN":          "AT+CGSN\r\n860000000000001\r\n\r\nOK",
+		"AT+CGATT?":        "+CGATT: 1\r\n\r\nOK",
 	}
 }
 
@@ -108,6 +110,14 @@ func TestUSBATStatusParsesAModuleAnswer(t *testing.T) {
 	}
 	if status.USBNetMode != 1 {
 		t.Errorf("USBNetMode = %d, want 1 (ECM)", status.USBNetMode)
+	}
+	if status.IMEI != "860000000000001" {
+		t.Errorf("IMEI = %q", status.IMEI)
+	}
+	// Registered and attached are separate states, and the view used to report
+	// the second one as false no matter what the module said.
+	if !status.PSAttached {
+		t.Error("PSAttached = false although AT+CGATT? answered 1")
 	}
 }
 
@@ -233,5 +243,38 @@ func TestSendUSBATSMSReportsARefusedPDUMode(t *testing.T) {
 
 	if _, err := instance.sendUSBATSMS("+8613800138000", "hi"); err == nil {
 		t.Fatal("sendUSBATSMS() succeeded although the module refused PDU mode")
+	}
+}
+
+func TestParseUSBATCGATTReadsTheAttachState(t *testing.T) {
+	for _, tt := range []struct {
+		name     string
+		response string
+		want     bool
+	}{
+		{name: "attached", response: "AT+CGATT?\r\n+CGATT: 1\r\n\r\nOK", want: true},
+		{name: "not attached", response: "AT+CGATT?\r\n+CGATT: 0\r\n\r\nOK", want: false},
+		{name: "refused", response: "AT+CGATT?\r\nERROR", want: false},
+		{name: "empty", response: "", want: false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := parseUSBATCGATT(tt.response); got != tt.want {
+				t.Fatalf("parseUSBATCGATT(%q) = %v, want %v", tt.response, got, tt.want)
+			}
+		})
+	}
+}
+
+// AT+CGSN answers with a bare IMEI and AT+CIMI with a bare IMSI, which is why
+// one reader serves both.
+func TestParseUSBATBareDigitsReadsIMEIAndIMSI(t *testing.T) {
+	if got := parseUSBATBareDigits("AT+CGSN\r\n860000000000001\r\n\r\nOK"); got != "860000000000001" {
+		t.Errorf("IMEI = %q", got)
+	}
+	if got := parseUSBATBareDigits("AT+CIMI\r\n460115089094752\r\n\r\nOK"); got != "460115089094752" {
+		t.Errorf("IMSI = %q", got)
+	}
+	if got := parseUSBATBareDigits("AT+CGSN\r\nERROR"); got != "" {
+		t.Errorf("a refused query returned %q, want empty", got)
 	}
 }

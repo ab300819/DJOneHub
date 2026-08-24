@@ -28,7 +28,11 @@ func (darwinHost) InterfaceCounters() (map[string]networkByteCounters, error) {
 }
 
 func (darwinHost) ProcessFlows(protocol string) ([]service.ActivityRecord, error) {
-	out, err := exec.Command("nettop", "-L", "1", "-x", "-m", protocol, "-t", "wired").Output()
+	// -n keeps nettop from resolving names. Without it a single call takes some
+	// thirty seconds, which is longer than the poll interval of every caller.
+	// It costs nothing: measured against real output, the remote ends arrive as
+	// addresses with or without resolution.
+	out, err := exec.Command("nettop", "-n", "-L", "1", "-x", "-m", protocol, "-t", "wired").Output()
 	if err != nil {
 		return nil, err
 	}
