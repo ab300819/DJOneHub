@@ -30,14 +30,14 @@ func main() {
 	flag.BoolVar(&stdioMode, "stdio", false, "serve line-delimited JSON on stdin/stdout instead of HTTP")
 	flag.Parse()
 
+	probe := defaultHostProbe()
 	if demo {
-		instance := newDemoApp()
+		instance := newDemoApp(probe)
 		log.Printf("DJOneHub demo mode")
 		serve(instance, listen)
 		return
 	}
 
-	probe := defaultHostProbe()
 	if strings.TrimSpace(port) == "" {
 		var err error
 		port, err = probe.ATPort()
@@ -92,7 +92,13 @@ func main() {
 		log.Fatalf("create modem manager: %v", err)
 	}
 
-	instance := &app{modem: manager, port: port, smsPollInterval: 8 * time.Second, smsAutoCleanupME: true}
+	instance := &app{
+		modem:            manager,
+		host:             probe,
+		port:             port,
+		smsPollInterval:  8 * time.Second,
+		smsAutoCleanupME: true,
+	}
 	manager.SetSMSCallback(instance.recordSMS)
 	if err := manager.Start(); err != nil {
 		log.Fatalf("open modem on %s: %v", port, err)

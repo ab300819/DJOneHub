@@ -42,14 +42,18 @@ type HostProbe interface {
 	ProcessFlows(protocol string) ([]service.ActivityRecord, error)
 }
 
-// probe returns the host probe this app was built with. Tests construct &app{}
-// directly and pass their own; leaving the field empty has to keep working, so
-// the platform default fills in rather than panicking.
+// probe returns the host probe this app was built with. Every construction that
+// runs for real injects one; what remains is a net under the tests that build
+// &app{} and never touch the host, so an empty field reports an absent machine
+// instead of panicking. It deliberately does not fall back to the platform
+// default: a core that reaches for macOS on its own has no seam at all, and a
+// forgotten injection should look like nothing rather than quietly work on one
+// platform and break on the next.
 func (a *app) probe() HostProbe {
 	if a.host != nil {
 		return a.host
 	}
-	return defaultHostProbe()
+	return unsupportedHost{}
 }
 
 // unsupportedHost is what a platform without ioreg, ifconfig, route and nettop

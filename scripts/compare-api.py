@@ -2,8 +2,21 @@
 import json, pathlib, sys
 sp = pathlib.Path(sys.argv[1])
 volatile = {"sampled_at_ms","last_poll","rx_bytes","tx_bytes","timestamp","session_rx_bytes","session_tx_bytes","session_total_bytes"}
+# 活流量列表：连接是机器此刻的实时快照，两次采集之间必然变化，比内容只会
+# 造出误报。改为比结构——出现过哪些字段——这样"重构把 process 字段弄丢了"
+# 仍然抓得到，而"微信换了一条连接"不会。
+live_lists = {"connections"}
+def shape(items):
+    keys = sorted({k for it in items if isinstance(it, dict) for k in it})
+    return {"__live_list_fields__": keys}
 def norm(o):
-    if isinstance(o, dict):  return {k: norm(v) for k, v in sorted(o.items()) if k not in volatile}
+    if isinstance(o, dict):
+        out = {}
+        for k, v in sorted(o.items()):
+            if k in volatile:      continue
+            if k in live_lists and isinstance(v, list): out[k] = shape(v)
+            else:                  out[k] = norm(v)
+        return out
     if isinstance(o, list):  return [norm(v) for v in o]
     return o
 bad = 0

@@ -124,10 +124,11 @@ func (a *app) installESIMManager(manager *esim.Manager, switchAllowed bool) bool
 	return true
 }
 
-func newDemoApp() *app {
+func newDemoApp(host HostProbe) *app {
 	now := time.Now()
 	return &app{
 		demo:            true,
+		host:            host,
 		port:            "Demo · Quectel EG25-G",
 		smsPollInterval: 8 * time.Second,
 		sms: []receivedSMS{
