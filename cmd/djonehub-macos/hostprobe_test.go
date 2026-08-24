@@ -270,26 +270,35 @@ func TestUnsupportedHostDegradesInsteadOfFailing(t *testing.T) {
 	}
 }
 
-// ioregWithModule is shaped like `ioreg -r -c IOUSBHostDevice -l -w 0`: one
-// blank-line-separated block per USB device, each carrying its whole subtree, so
-// the ECM driver's BSD name sits in the same block as the module's idVendor.
+// ioregWithModule is trimmed from real `ioreg -r -c IOUSBHostDevice -l -w 0`
+// output with the module attached: one blank-line-separated block per USB
+// device, each carrying its whole subtree. The module's four vendor-specific
+// interfaces come first, then the ECM control interface whose driver chain ends
+// at the BSD name — which is why the name can be found in the same block as the
+// module's own idVendor.
 const ioregWithModule = `+-o USB2 Hub@02100000  <class IOUSBHostDevice, id 0x100000a88, registered, matched, active, busy 0 (475 ms), retain 37>
   |   "idProduct" = 10775
   |   "idVendor" = 1452
-  | +-o IOUSBHostInterface@0  <class IOUSBHostInterface, id 0x100000a89, registered, matched, active, busy 0, retain 8>
-  | |   "bInterfaceNumber" = 0
 
-+-o Baiwang@01100000  <class IOUSBHostDevice, id 0x1000cd001, registered, matched, active, busy 0 (120 ms), retain 44>
++-o Baiwang@00100000  <class IOUSBHostDevice, id 0x1000ecaa1, registered, matched, active, busy 0 (133 ms), retain 122>
   |   "idProduct" = 293
   |   "idVendor" = 11388
+  |   "iSerialNumber" = 0
   |   "USB Product Name" = "Baiwang"
-  | +-o IOUSBHostInterface@0  <class IOUSBHostInterface, id 0x1000cd010, registered, matched, active, busy 0, retain 9>
+  +-o IOUSBHostInterface@0  <class IOUSBHostInterface, id 0x1000ecaa6, registered, matched, active, busy 0 (15 ms), retain 7>
+  |     "bInterfaceNumber" = 0
+  |     "bInterfaceClass" = 255
+  +-o CDC Ethernet Control Model (ECM)@4  <class IOUSBHostInterface, id 0x1000ecaaa, registered, matched, active, busy 0 (108 ms), retain 11>
   | |   "bInterfaceClass" = 2
-  | |   "bInterfaceNumber" = 0
-  | | +-o AppleUserECMControl  <class AppleUserECMControl, id 0x1000cd020, registered, matched, active, busy 0, retain 7>
-  | | | +-o en11  <class IOEthernetInterface, id 0x1000cd030, registered, matched, active, busy 0, retain 6>
-  | | | |   "BSD Name" = "en11"
-  | | | |   "IOInterfaceUnit" = 11
+  | |   "bInterfaceNumber" = 4
+  | +-o AppleUserECM  <class IOUserNetworkEthernet, id 0x1000ecab0, registered, matched, active, busy 0 (8 ms), retain 21>
+  |   |   "bInterfaceClass" = 2
+  |   +-o IOSkywalkLegacyEthernet  <class IOSkywalkLegacyEthernet, id 0x1000ecabe, !registered, !matched, active, busy 0 (5 ms), retain 8>
+  |   | +-o en11  <class IOSkywalkLegacyEthernetInterface, id 0x1000ecac0, registered, matched, active, busy 0 (5 ms), retain 10>
+  |   |   |   "BSD Name" = "en11"
+  +-o IOUSBHostInterface@5  <class IOUSBHostInterface, id 0x1000ecaac, registered, matched, active, busy 0 (91 ms), retain 12>
+  | |   "bInterfaceClass" = 10
+  | |   "bInterfaceNumber" = 5
 
 +-o USB 2.0 BILLBOARD@01100000  <class IOUSBHostDevice, id 0x100000a95, registered, matched, active, busy 0 (389 ms), retain 71>
   |   "idProduct" = 20549

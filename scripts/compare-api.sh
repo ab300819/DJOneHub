@@ -19,8 +19,19 @@ capture() {
   binary=$1
   outdir=$2
   mkdir -p "$outdir"
+
+  # A capture that dies before its kill leaves a server holding the port, and
+  # every later capture then silently talks to that stale process instead of the
+  # binary it was asked to measure — which reads as a behaviour difference that
+  # is not one. Refuse to start, and clean up even when interrupted.
+  if lsof -ti ":$PORT" >/dev/null 2>&1; then
+    echo "端口 $PORT 已被占用，先清理：kill \$(lsof -ti :$PORT)" >&2
+    exit 1
+  fi
+
   "$binary" -demo -listen "127.0.0.1:$PORT" >/dev/null 2>&1 &
   pid=$!
+  trap 'kill $pid 2>/dev/null || true' EXIT INT TERM
   i=0
   while [ $i -lt 20 ]; do
     curl -s -m 2 "http://127.0.0.1:$PORT/api/health" >/dev/null 2>&1 && break
@@ -28,28 +39,36 @@ capture() {
     i=$((i + 1))
   done
 
+  : > "$outdir/_manifest.txt"
+
+  # nettop needs half a minute per call when it resolves names, so the timeout
+  # has to clear that. A curl failure is recorded rather than fatal: aborting
+  # mid-capture used to leave a partial baseline that the diff then accepted.
   for ep in health status sms sms/status network network/traffic network/local \
             network/activity esim esim/health esim/notes esim/module-notes; do
-    curl -s -m 15 "http://127.0.0.1:$PORT/api/$ep" > "$outdir/$(echo "$ep" | tr / _).json"
+    name=$(echo "$ep" | tr / _)
+    echo "$name" >> "$outdir/_manifest.txt"
+    curl -s -m 90 "http://127.0.0.1:$PORT/api/$ep" > "$outdir/$name.json" || true
   done
 
   post() {
-    curl -s -m 20 -X POST "http://127.0.0.1:$PORT/api/$1" \
-      -H 'Content-Type: application/json' -d "$2"
+    echo "${3:?post needs a capture name}" >> "$outdir/_manifest.txt"
+    curl -s -m 90 -X POST "http://127.0.0.1:$PORT/api/$1" \
+      -H 'Content-Type: application/json' -d "$2" || true
   }
-  post at '{"command":"AT+CSQ"}'                    > "$outdir/p_at.json"
-  post sms/send '{"phone":"10086","message":"hi"}'  > "$outdir/p_sms_send.json"
-  post sms/refresh '{}'                             > "$outdir/p_sms_refresh.json"
-  post sms/clear-module '{}'                        > "$outdir/p_sms_clear.json"
-  post network/usbnet '{"mode":1}'                   > "$outdir/p_usbnet.json"
-  post network/check-4g '{}'                         > "$outdir/p_check4g.json"
-  post esim/switch '{"iccid":"898601"}'              > "$outdir/p_esim_switch.json"
-  post esim/download '{"smdp":"rsp.example.com","imei":"123456789012345"}' > "$outdir/p_esim_dl.json"
-  post esim/phonebook/probe '{}'                     > "$outdir/p_phonebook.json"
+  post at '{"command":"AT+CSQ"}' p_at                    > "$outdir/p_at.json"
+  post sms/send '{"phone":"10086","message":"hi"}' p_sms_send  > "$outdir/p_sms_send.json"
+  post sms/refresh '{}' p_sms_refresh                             > "$outdir/p_sms_refresh.json"
+  post sms/clear-module '{}' p_sms_clear                        > "$outdir/p_sms_clear.json"
+  post network/usbnet '{"mode":1}' p_usbnet                   > "$outdir/p_usbnet.json"
+  post network/check-4g '{}' p_check4g                         > "$outdir/p_check4g.json"
+  post esim/switch '{"iccid":"898601"}' p_esim_switch              > "$outdir/p_esim_switch.json"
+  post esim/download '{"smdp":"rsp.example.com","imei":"123456789012345"}' p_esim_dl > "$outdir/p_esim_dl.json"
+  post esim/phonebook/probe '{}' p_phonebook                     > "$outdir/p_phonebook.json"
 
   code() {
-    curl -s -m 15 -o /dev/null -w '%{http_code}' -X "$1" "http://127.0.0.1:$PORT/api/$2" \
-      -H 'Content-Type: application/json' -d "$3"
+    curl -s -m 90 -o /dev/null -w '%{http_code}' -X "$1" "http://127.0.0.1:$PORT/api/$2" \
+      -H 'Content-Type: application/json' -d "$3" || true
   }
   {
     printf 'at_bad %s\n'       "$(code POST at '{"command":"HELLO"}')"
@@ -61,6 +80,7 @@ capture() {
 
   kill $pid 2>/dev/null || true
   wait $pid 2>/dev/null || true
+  trap - EXIT INT TERM
 }
 
 case "$MODE" in

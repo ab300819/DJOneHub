@@ -7,6 +7,32 @@ def norm(o):
     if isinstance(o, list):  return [norm(v) for v in o]
     return o
 bad = 0
+
+# A capture that died halfway used to leave a short baseline that every later
+# comparison then passed, because the diff only walked the files that existed.
+# The manifest is what the capture *intended* to collect, so a missing or empty
+# response is a failure rather than a file that is quietly not compared.
+def manifest(side):
+    f = sp/side/"_manifest.txt"
+    return [l.strip() for l in f.read_text().splitlines() if l.strip()] if f.exists() else []
+
+want = {side: manifest(side) for side in ("baseline", "after")}
+for side, names in want.items():
+    if not names:
+        print("  ❌ %s 没有 _manifest.txt：采集未完成，请重新抓取" % side)
+        bad += 1
+        continue
+    missing = [n for n in names if not (sp/side/(n+".json")).exists() or not (sp/side/(n+".json")).read_text().strip()]
+    if missing:
+        bad += 1
+        print("  ❌ %s 有 %d 个响应为空或缺失：%s" % (side, len(missing), " ".join(missing)))
+if want["baseline"] and want["after"] and want["baseline"] != want["after"]:
+    bad += 1
+    print("  ❌ 两侧采集的端点集合不同，无法比对")
+if bad:
+    print("  采集不完整，比对结果不可信")
+    sys.exit(1)
+
 files = sorted((sp/"baseline").glob("*.json"))
 for f in files:
     peer = sp/"after"/f.name
