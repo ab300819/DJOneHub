@@ -133,26 +133,29 @@ type Service interface {
 //
 // Demo payloads are fixture data rather than a real read, so they are carried
 // as-is instead of being forced through the typed field.
+// The eSIM results below carry json tags because they cross Call, where the
+// wire shape is the contract. The HTTP handlers build their own bodies for the
+// browser console and are unaffected by these names.
 type ESIMOverviewResult struct {
-	PhysicalSIM bool
-	Message     string
-	Overview    *esim.EsimOverview
-	DemoPayload any
+	PhysicalSIM bool               `json:"physical_sim"`
+	Message     string             `json:"message,omitempty"`
+	Overview    *esim.EsimOverview `json:"overview,omitempty"`
+	DemoPayload any                `json:"demo_payload,omitempty"`
 }
 
 // ESIMHealthResult pairs the enabled profile with the module's own view of it.
 type ESIMHealthResult struct {
-	PhysicalSIM   bool
-	OK            bool
-	Message       string
-	ActiveProfile *esim.ProfileItem
-	ModuleICCID   string
-	IMSI          string
-	Operator      string
-	Registration  string
-	Registered    bool
-	SignalDBM     int
-	NetworkMode   string
+	PhysicalSIM   bool              `json:"physical_sim"`
+	OK            bool              `json:"ok"`
+	Message       string            `json:"message,omitempty"`
+	ActiveProfile *esim.ProfileItem `json:"active_profile,omitempty"`
+	ModuleICCID   string            `json:"module_iccid,omitempty"`
+	IMSI          string            `json:"imsi,omitempty"`
+	Operator      string            `json:"operator,omitempty"`
+	Registration  string            `json:"registration,omitempty"`
+	Registered    bool              `json:"registered"`
+	SignalDBM     int               `json:"signal_dbm"`
+	NetworkMode   string            `json:"network_mode,omitempty"`
 }
 
 // ProfileNote is a locally stored note about one profile.
@@ -209,38 +212,38 @@ type ESIMDownloadRequest struct {
 
 // ESIMDownloadResult reports a completed download.
 type ESIMDownloadResult struct {
-	Demo    bool
-	Message string
-	Result  *esim.DownloadProfileResult
+	Demo    bool                        `json:"demo"`
+	Message string                      `json:"message,omitempty"`
+	Result  *esim.DownloadProfileResult `json:"result,omitempty"`
 }
 
 // ESIMDeleteResult reports a completed deletion.
 type ESIMDeleteResult struct {
-	Demo    bool
-	Message string
-	Result  *esim.DeleteProfileResult
+	Demo    bool                      `json:"demo"`
+	Message string                    `json:"message,omitempty"`
+	Result  *esim.DeleteProfileResult `json:"result,omitempty"`
 }
 
 // ESIMRenameResult reports an accepted nickname change. The card returns nothing
 // beyond success, so there is no result body to carry.
 type ESIMRenameResult struct {
-	Demo    bool
-	Message string
+	Demo    bool   `json:"demo"`
+	Message string `json:"message,omitempty"`
 }
 
 // ESIMSwitchResult reports a profile switch and the module restart that follows
 // it, which is needed because the modem can otherwise keep the previous SIM
 // session alive.
 type ESIMSwitchResult struct {
-	Demo                  bool
-	SwitchAccepted        bool
-	Phase                 string
-	TargetICCID           string
-	RecoveryPending       bool
-	ModuleRebootRequested bool
-	ModuleRebootResponse  string
-	ModuleRebootWarning   string
-	ReconnectWaitSeconds  int
+	Demo                  bool   `json:"demo"`
+	SwitchAccepted        bool   `json:"switch_accepted"`
+	Phase                 string `json:"phase,omitempty"`
+	TargetICCID           string `json:"target_iccid,omitempty"`
+	RecoveryPending       bool   `json:"recovery_pending"`
+	ModuleRebootRequested bool   `json:"module_reboot_requested"`
+	ModuleRebootResponse  string `json:"module_reboot_response,omitempty"`
+	ModuleRebootWarning   string `json:"module_reboot_warning,omitempty"`
+	ReconnectWaitSeconds  int    `json:"reconnect_wait_seconds"`
 }
 
 // PhonebookProbe reports which phonebook operations the module supports.

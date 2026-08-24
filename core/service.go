@@ -623,6 +623,23 @@ func (a *App) DownloadESIMProfile(ctx context.Context, request service.ESIMDownl
 			"imei is required for USB AT eSIM download")
 	}
 	if a.demo {
+		// Demo mode exists so the UI can be built without hardware, and a
+		// progress bar that never moves cannot be checked that way. These are
+		// the phases a real download reports, at a pace a person can watch.
+		for _, step := range []Event{
+			{Event: EventESIMDownloadProgress, Percent: 10, Message: "正在连接 SM-DP+"},
+			{Event: EventESIMDownloadProgress, Percent: 35, Message: "正在认证 eUICC"},
+			{Event: EventESIMDownloadProgress, Percent: 60, Message: "正在下载 Profile"},
+			{Event: EventESIMDownloadProgress, Percent: 85, Message: "正在安装 Profile"},
+			{Event: EventESIMDownloadProgress, Percent: 100, Message: "安装完成"},
+		} {
+			select {
+			case <-ctx.Done():
+				return service.ESIMDownloadResult{}, service.Fail(service.KindUnavailable, "下载已取消")
+			case <-time.After(600 * time.Millisecond):
+			}
+			a.emit(step)
+		}
 		return service.ESIMDownloadResult{Demo: true, Message: "演示：Profile 下载完成"}, nil
 	}
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
