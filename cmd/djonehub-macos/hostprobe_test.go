@@ -23,6 +23,7 @@ type fakeHost struct {
 }
 
 func (f fakeHost) USBDevice() *usbDeviceStatus          { return f.usb }
+func (f fakeHost) ATPort() (string, error)              { return "", errors.New("no serial port") }
 func (f fakeHost) ModuleInterface() string              { return f.moduleIface }
 func (f fakeHost) NetworkInterfaces() []macNetInterface { return f.interfaces }
 func (f fakeHost) DefaultRoute() macDefaultRoute        { return f.route }

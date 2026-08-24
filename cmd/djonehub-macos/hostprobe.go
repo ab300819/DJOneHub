@@ -18,6 +18,10 @@ type HostProbe interface {
 	// USBDevice reports the attached module, or nil when none is present.
 	USBDevice() *usbDeviceStatus
 
+	// ATPort names a serial AT port to drive the module through, for hosts that
+	// expose one. The USB transport is used when this finds nothing.
+	ATPort() (string, error)
+
 	// ModuleInterface names the network interface the module itself created,
 	// or "" when the module is absent or has no network interface up. It is the
 	// only trustworthy answer to "which interface is the module": interface
@@ -55,6 +59,10 @@ func (a *app) probe() HostProbe {
 type unsupportedHost struct{}
 
 func (unsupportedHost) USBDevice() *usbDeviceStatus { return nil }
+
+func (unsupportedHost) ATPort() (string, error) {
+	return "", errors.New("serial AT port discovery is not available on this platform")
+}
 
 func (unsupportedHost) ModuleInterface() string { return "" }
 
