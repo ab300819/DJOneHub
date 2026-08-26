@@ -106,9 +106,13 @@ func (a *App) ExecuteAT(command string) (string, error) {
 }
 
 func (a *App) ListSMS() []service.ReceivedSMS {
-	a.smsMu.RLock()
+	// Takes the write lock because the first read is what pulls the history in
+	// from disk; a read lock here would leave a restarted core showing nothing
+	// until the first poll happened to arrive.
+	a.smsMu.Lock()
+	a.loadSMSHistoryLocked()
 	items := append([]receivedSMS(nil), a.sms...)
-	a.smsMu.RUnlock()
+	a.smsMu.Unlock()
 	if items == nil {
 		items = []receivedSMS{}
 	}
@@ -116,11 +120,12 @@ func (a *App) ListSMS() []service.ReceivedSMS {
 }
 
 func (a *App) SMSStatus() service.SMSStatus {
-	a.smsMu.RLock()
+	a.smsMu.Lock()
+	a.loadSMSHistoryLocked()
 	lastPoll := a.smsLastPoll
 	lastPollError := a.smsLastPollError
 	count := len(a.sms)
-	a.smsMu.RUnlock()
+	a.smsMu.Unlock()
 	return service.SMSStatus{
 		Count:         count,
 		Polling:       !a.demo && a.modem == nil,

@@ -54,6 +54,9 @@ type App struct {
 	smsLastPoll      time.Time
 	smsLastPollError string
 
+	smsHistoryPath   string
+	smsHistoryLoaded bool
+
 	profileNotesMu     sync.Mutex
 	profileNotes       map[string]profileNote
 	profileNotesLoaded bool

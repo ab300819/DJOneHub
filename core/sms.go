@@ -24,10 +24,20 @@ func (a *App) RecordSMS(sender, content string, timestamp time.Time) {
 func (a *App) mergeSMS(messages []receivedSMS) (newCount int, total int) {
 	a.smsMu.Lock()
 	defer a.smsMu.Unlock()
+	a.loadSMSHistoryLocked()
+	return a.mergeSMSLocked(messages, true)
+}
+
+// mergeSMSLocked folds messages into the list, keeping it deduplicated, newest
+// first, and capped. `persist` is false while loading from disk: those messages
+// are already there, and writing them back would double the file on every
+// start. Callers hold smsMu for writing.
+func (a *App) mergeSMSLocked(messages []receivedSMS, persist bool) (newCount int, total int) {
 	seen := make(map[string]bool, len(a.sms)+len(messages))
 	for _, item := range a.sms {
 		seen[smsCacheKey(item)] = true
 	}
+	added := make([]receivedSMS, 0, len(messages))
 	for _, item := range messages {
 		if item.Code == "" {
 			item.Code = extractSMSCode(item.Content)
@@ -38,11 +48,17 @@ func (a *App) mergeSMS(messages []receivedSMS) (newCount int, total int) {
 		}
 		seen[key] = true
 		a.sms = append(a.sms, item)
+		added = append(added, item)
 		newCount++
+	}
+	if persist {
+		a.appendSMSHistoryLocked(added)
 	}
 	sort.SliceStable(a.sms, func(i, j int) bool {
 		return a.sms[i].Timestamp.After(a.sms[j].Timestamp)
 	})
+	// The cap is on what is kept in memory; the history on disk is not
+	// truncated, so an older message is out of the list but not lost.
 	if len(a.sms) > 500 {
 		a.sms = a.sms[:500]
 	}
