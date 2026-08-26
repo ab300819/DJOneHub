@@ -204,6 +204,13 @@ func (a *App) runATCommand(command string, timeout time.Duration) (string, error
 			"AT+CGACT?":          "+CGACT: 1,1\r\nOK",
 			"AT+CGPADDR=1":       "+CGPADDR: 1,\"10.23.45.67\"\r\nOK",
 		}
+		// The module phonebook is read back through the real parser, so demo
+		// mode answers with the wire format rather than short-circuiting the
+		// read. Without these the capacity never arrives and the app correctly
+		// concludes the module has no ME phonebook, hiding the editor.
+		phonebookStatus, phonebookEntries := demoMEPhonebook()
+		responses[`AT+CPBS?`] = phonebookStatus
+		responses[fmt.Sprintf("AT+CPBR=1,%d", demoMEPhonebookCapacity)] = phonebookEntries
 		response := responses[strings.ToUpper(strings.TrimSpace(command))]
 		if response == "" {
 			response = "OK"

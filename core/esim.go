@@ -78,6 +78,10 @@ func (a *App) phonebookProbeCommand(command string, result *phonebookProbeResult
 
 const moduleNotePrefix = "VH1|"
 
+// demoMEPhonebookCapacity matches the SM capacity the demo phonebook probe
+// reports, so the two demo readings do not describe different modules.
+const demoMEPhonebookCapacity = 250
+
 func encodeModuleProfileNote(note moduleProfileNote) (string, error) {
 	note.ICCID = strings.TrimSpace(note.ICCID)
 	note.Label = strings.TrimSpace(note.Label)
@@ -141,6 +145,30 @@ func parseMEPhonebookEntries(response string) []modulePhonebookEntry {
 		}
 	}
 	return entries
+}
+
+// demoMEPhonebook is the ME phonebook demo mode answers with. The entries are
+// run through encodeModuleProfileNote rather than written out as literals, so a
+// change to the on-module format cannot leave demo mode encoding the old one —
+// and the real parser, not a demo-only branch, is what reads them back.
+func demoMEPhonebook() (status, entries string) {
+	var builder strings.Builder
+	used := 0
+	for _, note := range []moduleProfileNote{
+		{ICCID: "89860123456789012345", Label: "主号 · 移动", Phone: "13800138000", Tags: "常用,实名"},
+		{ICCID: "8944100000000000001", Label: "英国旅行卡", Phone: "+447400123456", Tags: "旅行,数据"},
+	} {
+		encoded, err := encodeModuleProfileNote(note)
+		if err != nil {
+			continue
+		}
+		used++
+		fmt.Fprintf(&builder, "+CPBR: %d,\"00000000000\",129,\"%s\"\r\n", used, encoded)
+	}
+	builder.WriteString("OK")
+	// Counted from what actually encoded, so the capacity line can never claim
+	// more records than the read returns.
+	return fmt.Sprintf("+CPBS: \"ME\",%d,%d\r\nOK", used, demoMEPhonebookCapacity), builder.String()
 }
 
 func (a *App) readModuleESIMNotes() (map[string]moduleProfileNote, map[int]bool, int, int, error) {

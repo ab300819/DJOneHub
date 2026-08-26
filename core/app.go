@@ -178,6 +178,7 @@ func NewDemo(host HostProbe) *App {
 		demo:            true,
 		host:            host,
 		port:            "Demo · Quectel EG25-G",
+		usbDevice:       demoUSBDevice(),
 		smsPollInterval: 8 * time.Second,
 		sms: []receivedSMS{
 			{
@@ -191,6 +192,30 @@ func NewDemo(host HostProbe) *App {
 				Code:      "482913",
 				Timestamp: now.Add(-2 * time.Hour),
 			},
+		},
+	}
+}
+
+// demoUSBDevice mirrors the composition the module actually enumerates with:
+// four vendor-specific interfaces plus the ECM control/data pair. The pair is
+// what the hardware panel reads to explain the current usbnet mode, so a demo
+// device without it would let a wrong explanation pass review unnoticed.
+func demoUSBDevice() *usbDeviceStatus {
+	return &usbDeviceStatus{
+		Product:    "Demo Module",
+		Vendor:     "Quectel",
+		VendorID:   "2c7c",
+		ProductID:  "0125",
+		LocationID: "0x100000",
+		Speed:      "high-speed",
+		Mode:       "vendor-specific USB mode",
+		Interfaces: []service.USBInterface{
+			{Number: 0, Class: 255, Subclass: 255, Protocol: 255, Endpoints: 2},
+			{Number: 1, Class: 255, Endpoints: 3},
+			{Number: 2, Class: 255, Endpoints: 3},
+			{Number: 3, Class: 255, Endpoints: 3},
+			{Number: 4, Class: 2, Subclass: 6, Endpoints: 1},
+			{Number: 5, Class: 10, Endpoints: 2},
 		},
 	}
 }
