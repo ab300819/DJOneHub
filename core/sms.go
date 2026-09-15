@@ -15,13 +15,19 @@ import (
 	"github.com/ab300819/DJOneHub/pkg/smscodec"
 )
 
+// RecordSMS is wired to the modem manager's callback, whose signature leaves
+// nowhere to return an error — so a failure to store is logged here rather than
+// disappearing. The poll path checks the same error and holds back the module
+// cleanup; this path has no module copy to protect.
 func (a *App) RecordSMS(sender, content string, timestamp time.Time) {
-	a.mergeSMS([]receivedSMS{{
+	if _, _, err := a.mergeSMS([]receivedSMS{{
 		Sender: sender, Content: content, Timestamp: timestamp,
-	}})
+	}}); err != nil {
+		log.Printf("record SMS: %v", err)
+	}
 }
 
-func (a *App) mergeSMS(messages []receivedSMS) (newCount int, total int) {
+func (a *App) mergeSMS(messages []receivedSMS) (newCount int, total int, err error) {
 	a.smsMu.Lock()
 	defer a.smsMu.Unlock()
 	a.loadSMSHistoryLocked()
@@ -32,7 +38,7 @@ func (a *App) mergeSMS(messages []receivedSMS) (newCount int, total int) {
 // first, and capped. `persist` is false while loading from disk: those messages
 // are already there, and writing them back would double the file on every
 // start. Callers hold smsMu for writing.
-func (a *App) mergeSMSLocked(messages []receivedSMS, persist bool) (newCount int, total int) {
+func (a *App) mergeSMSLocked(messages []receivedSMS, persist bool) (newCount int, total int, err error) {
 	seen := make(map[string]bool, len(a.sms)+len(messages))
 	for _, item := range a.sms {
 		seen[smsCacheKey(item)] = true
@@ -52,7 +58,7 @@ func (a *App) mergeSMSLocked(messages []receivedSMS, persist bool) (newCount int
 		newCount++
 	}
 	if persist {
-		a.appendSMSHistoryLocked(added)
+		err = a.appendSMSHistoryLocked(added)
 	}
 	sort.SliceStable(a.sms, func(i, j int) bool {
 		return a.sms[i].Timestamp.After(a.sms[j].Timestamp)
@@ -62,7 +68,7 @@ func (a *App) mergeSMSLocked(messages []receivedSMS, persist bool) (newCount int
 	if len(a.sms) > 500 {
 		a.sms = a.sms[:500]
 	}
-	return newCount, len(a.sms)
+	return newCount, len(a.sms), err
 }
 
 func smsCacheKey(item receivedSMS) string {
@@ -114,8 +120,13 @@ func (a *App) pollSMSOnce() error {
 		a.setSMSPollStatus(err)
 		return err
 	}
-	newCount, total := a.mergeSMS(messages)
-	if a.smsAutoCleanupME && len(messages) > 0 {
+	newCount, total, storeErr := a.mergeSMS(messages)
+	// Only once our copy is on disk. Clearing the module first would leave the
+	// last copy nowhere, and a failed write is exactly when its copy matters.
+	if storeErr != nil {
+		log.Printf("keeping module SMS copy: history write failed: %v", storeErr)
+	}
+	if a.smsAutoCleanupME && storeErr == nil && len(messages) > 0 {
 		before, after, cleanupErr := a.clearUSBATSMSMemory("ME")
 		if cleanupErr != nil {
 			log.Printf("auto cleanup ME SMS failed: %v", cleanupErr)

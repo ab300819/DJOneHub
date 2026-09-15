@@ -56,6 +56,7 @@ type App struct {
 
 	smsHistoryPath   string
 	smsHistoryLoaded bool
+	smsStored        int
 
 	profileNotesMu     sync.Mutex
 	profileNotes       map[string]profileNote
@@ -149,6 +150,10 @@ type Options struct {
 	DiscoveryError string
 	// USBDevice is the module as the host's USB inventory sees it.
 	USBDevice *usbDeviceStatus
+	// KeepModuleCopy leaves the module's own SMS storage untouched after a
+	// poll. The default clears it, which is what keeps the module from filling
+	// up; keeping it costs that in exchange for a second copy.
+	KeepModuleCopy bool
 }
 
 // New builds a core. The SMS polling defaults live here rather than at the call
@@ -163,7 +168,7 @@ func New(opts Options) *App {
 		discoveryError:   opts.DiscoveryError,
 		usbDevice:        opts.USBDevice,
 		smsPollInterval:  8 * time.Second,
-		smsAutoCleanupME: true,
+		smsAutoCleanupME: !opts.KeepModuleCopy,
 		smsReassembler:   smscodec.NewReassembler(),
 	}
 }

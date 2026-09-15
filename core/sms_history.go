@@ -80,48 +80,56 @@ func (a *App) loadSMSHistoryLocked() {
 	if damaged > 0 {
 		log.Printf("SMS history: skipped %d unreadable line(s)", damaged)
 	}
-	a.mergeSMSLocked(stored, false)
+	a.smsStored = len(stored)
+	// persist=false, so there is no write to fail.
+	_, _, _ = a.mergeSMSLocked(stored, false)
 }
 
-// appendSMSHistory adds messages that were not already on disk. Callers hold
+// appendSMSHistoryLocked adds messages that were not already on disk, and
+// reports whether they got there. The caller needs that answer: clearing the
+// module's copy before ours is written would destroy the last one. Callers hold
 // smsMu for writing.
-func (a *App) appendSMSHistoryLocked(messages []receivedSMS) {
+func (a *App) appendSMSHistoryLocked(messages []receivedSMS) (err error) {
 	if a.demo || len(messages) == 0 {
-		return
+		return nil
 	}
 	path, err := a.smsHistoryFile()
 	if err != nil {
-		log.Printf("SMS history unavailable: %v", err)
-		return
+		return fmt.Errorf("locate SMS history: %w", err)
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		log.Printf("create SMS history directory: %v", err)
-		return
+		return fmt.Errorf("create SMS history directory: %w", err)
 	}
 	file, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
-		log.Printf("open SMS history: %v", err)
-		return
+		return fmt.Errorf("open SMS history: %w", err)
 	}
-	// Close is where a failed flush surfaces, so swallowing it would drop
-	// messages without ever saying so.
+	// Close is where a failed flush surfaces, so it decides the outcome rather
+	// than being logged and dropped. The named return is what lets the deferred
+	// close report that — a plain `return closeErr` would be evaluated before
+	// the defer ever ran.
 	defer func() {
-		if err := file.Close(); err != nil {
-			log.Printf("close SMS history: %v", err)
+		if closeErr := file.Close(); closeErr != nil && err == nil {
+			err = fmt.Errorf("close SMS history: %w", closeErr)
 		}
 	}()
 
+	written := 0
 	for _, item := range messages {
 		line, err := json.Marshal(item)
 		if err != nil {
-			log.Printf("encode SMS for history: %v", err)
-			continue
+			return fmt.Errorf("encode SMS for history: %w", err)
 		}
 		if _, err := file.Write(append(line, '\n')); err != nil {
-			// Losing the rest of the batch is better than interleaving a
-			// half-written line with the next append.
-			log.Printf("append SMS history: %v", err)
-			return
+			// Stopping mid-batch is better than interleaving a half-written
+			// line with the next append.
+			return fmt.Errorf("append SMS history: %w", err)
 		}
+		written++
 	}
+	if err := file.Sync(); err != nil {
+		return fmt.Errorf("flush SMS history: %w", err)
+	}
+	a.smsStored += written
+	return nil
 }

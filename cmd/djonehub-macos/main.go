@@ -23,11 +23,14 @@ func main() {
 	var port string
 	var listen string
 	var demo bool
+	var keepModuleCopy bool
 	flag.StringVar(&port, "port", "", "AT serial port; auto-detected when omitted")
 	flag.StringVar(&listen, "listen", "127.0.0.1:7575", "HTTP listen address")
 	flag.BoolVar(&demo, "demo", false, "run the web UI with simulated modem data")
 	flag.IntVar(&parentPID, "parent-pid", 0, "exit when this parent process goes away; used by the macOS core.App")
 	flag.BoolVar(&stdioMode, "stdio", false, "serve line-delimited JSON on stdin/stdout instead of HTTP")
+	flag.BoolVar(&keepModuleCopy, "keep-module-sms", false,
+		"leave the module's own SMS storage alone after reading; it fills up, but keeps a second copy")
 	flag.Parse()
 
 	probe := defaultHostProbe()
@@ -51,6 +54,7 @@ func main() {
 				Port:            "未发现 AT 串口",
 				DiscoveryError:  err.Error(),
 				USBDevice:       usbDevice,
+				KeepModuleCopy:  keepModuleCopy,
 			})
 			if usbDevice != nil {
 				log.Printf("DJI USB device detected without AT serial port: %s %s (%s:%s)",
@@ -89,7 +93,7 @@ func main() {
 		log.Fatalf("create modem manager: %v", err)
 	}
 
-	instance := core.New(core.Options{Modem: manager, Host: probe, Port: port})
+	instance := core.New(core.Options{Modem: manager, Host: probe, Port: port, KeepModuleCopy: keepModuleCopy})
 	manager.SetSMSCallback(instance.RecordSMS)
 	if err := manager.Start(); err != nil {
 		log.Fatalf("open modem on %s: %v", port, err)

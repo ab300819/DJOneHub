@@ -125,9 +125,11 @@ func (a *App) SMSStatus() service.SMSStatus {
 	lastPoll := a.smsLastPoll
 	lastPollError := a.smsLastPollError
 	count := len(a.sms)
+	stored := a.smsStored
 	a.smsMu.Unlock()
 	return service.SMSStatus{
 		Count:         count,
+		Stored:        stored,
 		Polling:       !a.demo && a.modem == nil,
 		PollIntervalS: int(a.smsPollInterval.Seconds()),
 		AutoCleanupME: a.smsAutoCleanupME,

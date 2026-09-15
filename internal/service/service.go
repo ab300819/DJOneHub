@@ -370,7 +370,11 @@ type ReceivedSMS struct {
 
 // SMSStatus describes the background polling that feeds ListSMS.
 type SMSStatus struct {
-	Count         int       `json:"count"`
+	Count int `json:"count"`
+	// Stored counts every message kept on disk, which Count does not: the list
+	// is capped so a poll does not ship the whole archive every few seconds.
+	// Without this the cap is invisible and looks like loss.
+	Stored        int       `json:"stored"`
 	Polling       bool      `json:"polling"`
 	PollIntervalS int       `json:"poll_interval_s"`
 	AutoCleanupME bool      `json:"auto_cleanup_me"`
