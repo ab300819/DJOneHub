@@ -93,8 +93,6 @@ func (a *server) routes() http.Handler {
 	mux.HandleFunc("POST /api/network/usbnet", a.setUSBNetMode)
 	mux.HandleFunc("POST /api/network/reboot-module", a.rebootModule)
 	mux.HandleFunc("GET /api/esim", a.esimOverview)
-	mux.HandleFunc("GET /api/esim/notes", a.listESIMNotes)
-	mux.HandleFunc("PUT /api/esim/notes", a.saveESIMNote)
 	mux.HandleFunc("GET /api/esim/module-notes", a.listModuleESIMNotes)
 	mux.HandleFunc("PUT /api/esim/module-notes", a.saveModuleESIMNote)
 	mux.HandleFunc("GET /api/esim/health", a.esimHealth)
@@ -261,30 +259,6 @@ func (a *server) rebootModule(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusAccepted, result)
 }
 
-func (a *server) listESIMNotes(w http.ResponseWriter, _ *http.Request) {
-	notes, err := a.svc.ListESIMNotes()
-	if err != nil {
-		writeServiceError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"notes": notes})
-}
-
-func (a *server) saveESIMNote(w http.ResponseWriter, r *http.Request) {
-	var body service.ProfileNoteInput
-	if !decodeJSON(w, r, &body) {
-		return
-	}
-	result, err := a.svc.SaveESIMNote(body)
-	if err != nil {
-		writeServiceError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, result)
-}
-
-// probeESIMPhonebook performs only AT test/read commands. It never writes a
-// phonebook entry, so it is safe to use before enabling portable card notes.
 func (a *server) probeESIMPhonebook(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, a.svc.ProbeESIMPhonebook())
 }

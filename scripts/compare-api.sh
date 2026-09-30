@@ -45,7 +45,7 @@ capture() {
   # has to clear that. A curl failure is recorded rather than fatal: aborting
   # mid-capture used to leave a partial baseline that the diff then accepted.
   for ep in health status sms sms/status network network/traffic network/local \
-            network/activity esim esim/health esim/notes esim/module-notes; do
+            network/activity esim esim/health esim/module-notes; do
     name=$(echo "$ep" | tr / _)
     echo "$name" >> "$outdir/_manifest.txt"
     curl -s -m 90 "http://127.0.0.1:$PORT/api/$ep" > "$outdir/$name.json" || true
@@ -81,7 +81,6 @@ capture() {
     printf 'at_bad %s\n'       "$(code POST at '{"command":"HELLO"}')"
     printf 'sms_empty %s\n'    "$(code POST sms/send '{"phone":"","message":""}')"
     printf 'usbnet_bad %s\n'   "$(code POST network/usbnet '{"mode":9}')"
-    printf 'note_bad %s\n'     "$(code PUT esim/notes '{}')"
     printf 'esim_del_bad %s\n' "$(code DELETE esim/profile '{}')"
     printf 'esim_rename_bad %s\n' "$(code PATCH esim/profile '{"iccid":"898601"}')"
   } > "$outdir/_codes.txt"

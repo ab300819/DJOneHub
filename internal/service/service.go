@@ -109,10 +109,6 @@ type Service interface {
 	ESIMOverview() (ESIMOverviewResult, error)
 	// ESIMHealth cross-checks the enabled profile against the module's registration.
 	ESIMHealth() (ESIMHealthResult, error)
-	// ListESIMNotes returns the locally stored per-ICCID notes.
-	ListESIMNotes() (map[string]ProfileNote, error)
-	// SaveESIMNote stores or clears a local note; empty fields delete it.
-	SaveESIMNote(note ProfileNoteInput) (SavedNote, error)
 	// ListModuleESIMNotes reads the notes kept in the module's own phonebook.
 	ListModuleESIMNotes() (ModuleNotes, error)
 	// SaveModuleESIMNote writes or deletes a note in the module's phonebook.
@@ -156,27 +152,6 @@ type ESIMHealthResult struct {
 	Registered    bool              `json:"registered"`
 	SignalDBM     int               `json:"signal_dbm"`
 	NetworkMode   string            `json:"network_mode,omitempty"`
-}
-
-// ProfileNote is a locally stored note about one profile.
-type ProfileNote struct {
-	Label string `json:"label"`
-	Phone string `json:"phone"`
-	Tags  string `json:"tags"`
-}
-
-// ProfileNoteInput is a note submitted for storage.
-type ProfileNoteInput struct {
-	ICCID string `json:"iccid"`
-	Label string `json:"label"`
-	Phone string `json:"phone"`
-	Tags  string `json:"tags"`
-}
-
-// SavedNote confirms a stored note.
-type SavedNote struct {
-	Message string      `json:"message"`
-	Note    ProfileNote `json:"note"`
 }
 
 // ModuleProfileNote is a note kept in the module's own phonebook.

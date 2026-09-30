@@ -239,24 +239,6 @@ func dispatch(svc service.Service, request Request) Response {
 		}
 		return ok(result)
 
-	case "esim.notes.list":
-		notes, err := svc.ListESIMNotes()
-		if err != nil {
-			return failure(request.ID, err)
-		}
-		return ok(notes)
-
-	case "esim.notes.save":
-		var params service.ProfileNoteInput
-		if failure := bind(&params); failure != nil {
-			return *failure
-		}
-		result, err := svc.SaveESIMNote(params)
-		if err != nil {
-			return failure(request.ID, err)
-		}
-		return ok(result)
-
 	case "esim.moduleNotes.list":
 		result, err := svc.ListModuleESIMNotes()
 		if err != nil {

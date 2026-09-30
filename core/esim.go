@@ -2,69 +2,13 @@ package core
 
 import (
 	"encoding/base64"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
 	"time"
 )
-
-func (a *App) loadProfileNotesLocked() error {
-	if a.profileNotesLoaded {
-		return nil
-	}
-	path := a.profileNotesPath
-	if path == "" {
-		configDir, err := os.UserConfigDir()
-		if err != nil {
-			return fmt.Errorf("locate profile notes directory: %w", err)
-		}
-		path = filepath.Join(configDir, "DJOneHub", "profile-notes.json")
-		a.profileNotesPath = path
-	}
-	notes := make(map[string]profileNote)
-	readPath := path
-	if _, err := os.Stat(readPath); errors.Is(err, os.ErrNotExist) {
-		legacyPath := filepath.Join(filepath.Dir(filepath.Dir(path)), "VoHive macOS", "profile-notes.json")
-		if _, legacyErr := os.Stat(legacyPath); legacyErr == nil {
-			readPath = legacyPath
-		}
-	}
-	data, err := os.ReadFile(readPath)
-	if err != nil && !errors.Is(err, os.ErrNotExist) {
-		return fmt.Errorf("read profile notes: %w", err)
-	}
-	if len(data) > 0 {
-		if err := json.Unmarshal(data, &notes); err != nil {
-			return fmt.Errorf("parse profile notes: %w", err)
-		}
-	}
-	a.profileNotes = notes
-	a.profileNotesLoaded = true
-	return nil
-}
-
-func (a *App) persistProfileNotesLocked() error {
-	if err := os.MkdirAll(filepath.Dir(a.profileNotesPath), 0o700); err != nil {
-		return fmt.Errorf("create profile notes directory: %w", err)
-	}
-	data, err := json.MarshalIndent(a.profileNotes, "", "  ")
-	if err != nil {
-		return fmt.Errorf("encode profile notes: %w", err)
-	}
-	temporary := a.profileNotesPath + ".tmp"
-	if err := os.WriteFile(temporary, data, 0o600); err != nil {
-		return fmt.Errorf("write profile notes: %w", err)
-	}
-	if err := os.Rename(temporary, a.profileNotesPath); err != nil {
-		return fmt.Errorf("replace profile notes: %w", err)
-	}
-	return nil
-}
 
 func (a *App) phonebookProbeCommand(command string, result *phonebookProbeResult) bool {
 	response, err := a.runATCommand(command, 6*time.Second)

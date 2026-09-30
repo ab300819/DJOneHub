@@ -530,42 +530,6 @@ func (a *App) ESIMHealth() (service.ESIMHealthResult, error) {
 	}, nil
 }
 
-func (a *App) ListESIMNotes() (map[string]service.ProfileNote, error) {
-	a.profileNotesMu.Lock()
-	defer a.profileNotesMu.Unlock()
-	if err := a.loadProfileNotesLocked(); err != nil {
-		return nil, service.Fail(service.KindInternal, "%s", err.Error())
-	}
-	return a.profileNotes, nil
-}
-
-func (a *App) SaveESIMNote(input service.ProfileNoteInput) (service.SavedNote, error) {
-	iccid := strings.TrimSpace(input.ICCID)
-	label := strings.TrimSpace(input.Label)
-	phone := strings.TrimSpace(input.Phone)
-	tags := strings.TrimSpace(input.Tags)
-	if iccid == "" {
-		return service.SavedNote{}, service.Fail(service.KindInvalid, "iccid is required")
-	}
-	if len(label) > 80 || len(phone) > 80 || len(tags) > 200 {
-		return service.SavedNote{}, service.Fail(service.KindInvalid, "本地备注字段过长")
-	}
-	a.profileNotesMu.Lock()
-	defer a.profileNotesMu.Unlock()
-	if err := a.loadProfileNotesLocked(); err != nil {
-		return service.SavedNote{}, service.Fail(service.KindInternal, "%s", err.Error())
-	}
-	if label == "" && phone == "" && tags == "" {
-		delete(a.profileNotes, iccid)
-	} else {
-		a.profileNotes[iccid] = profileNote{Label: label, Phone: phone, Tags: tags}
-	}
-	if err := a.persistProfileNotesLocked(); err != nil {
-		return service.SavedNote{}, service.Fail(service.KindInternal, "%s", err.Error())
-	}
-	return service.SavedNote{Message: "本地备注已保存", Note: a.profileNotes[iccid]}, nil
-}
-
 func (a *App) ListModuleESIMNotes() (service.ModuleNotes, error) {
 	a.moduleNotesMu.Lock()
 	defer a.moduleNotesMu.Unlock()

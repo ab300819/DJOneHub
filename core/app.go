@@ -17,8 +17,6 @@ import (
 
 type receivedSMS = service.ReceivedSMS
 
-type profileNote = service.ProfileNote
-
 type phonebookProbeResult = service.PhonebookProbe
 
 type moduleProfileNote = service.ModuleProfileNote
@@ -57,11 +55,6 @@ type App struct {
 	smsHistoryPath   string
 	smsHistoryLoaded bool
 	smsStored        int
-
-	profileNotesMu     sync.Mutex
-	profileNotes       map[string]profileNote
-	profileNotesLoaded bool
-	profileNotesPath   string
 
 	moduleNotesMu sync.Mutex
 
