@@ -186,8 +186,5 @@ scripts/compare-api.sh diff
 
 ## 已知的后续缺口
 
-- **进度条 UI 无处安放**：事件通道已通，但 SwiftUI App 还没有 eSIM 页面。
-  网页控制台是 5 视图（overview / network / sms / esim / at），SwiftUI 只有 3 页，
-  缺 network 和 esim，且 overview 没有"联网活动"。
 - **DTO 手抄两次**：Swift 侧已手写一遍，Android 还要再写。可考虑从 Go 结构体
   的 `json` tag 生成两侧模型，但建议等 Android DTO 真写起来、痛感具体了再决定。
