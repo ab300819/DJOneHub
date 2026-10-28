@@ -46,6 +46,14 @@ type usbATCandidate struct {
 }
 
 func openDJIUSBAT() (core.ATTransport, error) {
+	// libusb_init opens every USB device on the host, and on macOS 27 one
+	// belonging to something else can block that open indefinitely — taking
+	// the whole core down with it before it answers a single request. The
+	// registry read below opens nothing, so libusb is reached only when the
+	// module is actually there.
+	if discoverDJIUSBDevice() == nil {
+		return nil, errors.New("DJI USB AT device 2ca3:4006 or 2c7c:0125 not found")
+	}
 	var ctx *C.libusb_context
 	if rc := C.libusb_init(&ctx); rc != 0 {
 		return nil, fmt.Errorf("libusb init: %s", usbErrorName(rc))
