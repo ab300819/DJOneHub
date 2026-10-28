@@ -116,3 +116,20 @@ func TestDemoDiagnosticCarriesUSBDevice(t *testing.T) {
 		}
 	}
 }
+
+// The page's "currently in use" section is built from this alone, so without a
+// demo answer it vanishes and the eSIM page opens on the card with no context.
+func TestDemoESIMHealthReportsTheEnabledProfile(t *testing.T) {
+	result := demoResult(t, `{"id":1,"method":"esim.health"}`)
+	active, ok := result["active_profile"].(map[string]any)
+	if !ok {
+		t.Fatalf("no active profile in demo health: %v", result)
+	}
+	if active["iccid"] != result["module_iccid"] {
+		t.Errorf("demo health should agree with itself: profile %v, module %v",
+			active["iccid"], result["module_iccid"])
+	}
+	if result["ok"] != true || result["registered"] != true {
+		t.Errorf("demo health should read as healthy: %v", result)
+	}
+}

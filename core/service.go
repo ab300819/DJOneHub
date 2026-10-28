@@ -480,6 +480,9 @@ func (a *App) ESIMOverview() (service.ESIMOverviewResult, error) {
 }
 
 func (a *App) ESIMHealth() (service.ESIMHealthResult, error) {
+	if a.demo {
+		return demoESIMHealth(), nil
+	}
 	esimManager, _ := a.currentESIMManager()
 	if esimManager == nil {
 		return service.ESIMHealthResult{}, service.Fail(service.KindUnavailable, "eSIM manager is unavailable")
@@ -748,6 +751,25 @@ func (a *App) ProbeESIMPhonebook() service.PhonebookProbe {
 	result.ReadSupported = a.phonebookProbeCommand(`AT+CPBR=?`, &result)
 	result.WriteSupported = a.phonebookProbeCommand(`AT+CPBW=?`, &result)
 	return result
+}
+
+// demoESIMHealth agrees with the demo overview's enabled profile and the demo
+// status's registration, so the page reads as one consistent module.
+func demoESIMHealth() service.ESIMHealthResult {
+	return service.ESIMHealthResult{
+		OK: true,
+		ActiveProfile: &esim.ProfileItem{
+			ICCID: "89860123456789012345", Name: "中国移动",
+			ServiceProviderName: "China Mobile", State: 1, StateText: "enabled",
+		},
+		ModuleICCID:  "89860123456789012345",
+		IMSI:         "460001234567890",
+		Operator:     "China Mobile",
+		Registration: "已注册",
+		Registered:   true,
+		SignalDBM:    -73,
+		NetworkMode:  "LTE",
+	}
 }
 
 // demoESIMOverview is fixture data shaped like a real overview response. It is
