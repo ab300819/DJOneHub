@@ -25,6 +25,7 @@ func (a *App) usbATStatus() (modem.DeviceStatus, error) {
 	usbnetResp, _ := a.usbAT.Command(`AT+QCFG="usbnet"`, 3*time.Second)
 	cgsnResp, _ := a.usbAT.Command("AT+CGSN", 3*time.Second)
 	cgattResp, _ := a.usbAT.Command("AT+CGATT?", 3*time.Second)
+	servingResp, _ := a.usbAT.Command(`AT+QENG="servingcell"`, 3*time.Second)
 
 	if cpinErr != nil {
 		return modem.DeviceStatus{}, cpinErr
@@ -52,6 +53,13 @@ func (a *App) usbATStatus() (modem.DeviceStatus, error) {
 		RadioBand:     band,
 		RadioChannel:  channel,
 		USBNetMode:    usbnetMode,
+	}
+	// CSQ tops out at 31 (-51 dBm and above), so the serving cell's own RSSI
+	// replaces it whenever the module reports one.
+	if cell, ok := modem.ParseServingCellLTEInfo(servingResp); ok {
+		status.SignalRSRP = cell.RSRP
+		status.SignalRSRQ = cell.RSRQ
+		status.SignalDBM = cell.RSSI
 	}
 	if status.Operator == "" && strings.Contains(copsResp, "CHN-UNICOM") {
 		status.Operator = "CHN-UNICOM"

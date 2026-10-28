@@ -109,12 +109,24 @@ func TestExtractAllSMSPDUsAfterPrefixTrimsCMGLPadding(t *testing.T) {
 }
 
 func TestParseServingCellLTEInfoIncludesRadio(t *testing.T) {
-	info, ok := parseServingCellLTEInfo("\r\n+QENG: \"servingcell\",\"NOCONN\",\"LTE\",\"FDD\",460,01,8401A29,132,3740,8,3,3,-95,5992,-75,-8,-50,11,44\r\n\r\nOK\r\n")
+	info, ok := ParseServingCellLTEInfo("\r\n+QENG: \"servingcell\",\"NOCONN\",\"LTE\",\"FDD\",460,01,8401A29,132,3740,8,3,3,-95,5992,-75,-8,-50,11,44\r\n\r\nOK\r\n")
 	if !ok {
-		t.Fatal("parseServingCellLTEInfo() ok=false")
+		t.Fatal("ParseServingCellLTEInfo() ok=false")
 	}
 	if info.RSRP != -75 || info.RSRQ != -8 || info.SINR != 11 || info.Duplex != "FDD" || info.Band != "LTE BAND 8" || info.Channel != 3740 {
-		t.Fatalf("parseServingCellLTEInfo()=%+v", info)
+		t.Fatalf("ParseServingCellLTEInfo()=%+v", info)
+	}
+}
+
+// The QDC507 answers srxlev as "-" when it is camped without a measurement;
+// the whole line used to be thrown away for that one unused field.
+func TestParseServingCellLTEInfoToleratesMissingSrxlev(t *testing.T) {
+	info, ok := ParseServingCellLTEInfo("\r\n+QENG: \"servingcell\",\"NOCONN\",\"LTE\",\"FDD\",460,11,1234567,100,1650,3,5,5,1A2B,-82,-11,-51,3,-\r\n\r\nOK\r\n")
+	if !ok {
+		t.Fatal("ParseServingCellLTEInfo() ok=false")
+	}
+	if info.RSRP != -82 || info.RSRQ != -11 || info.RSSI != -51 || info.SINR != 3 {
+		t.Fatalf("ParseServingCellLTEInfo()=%+v", info)
 	}
 }
 

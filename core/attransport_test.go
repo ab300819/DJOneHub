@@ -121,6 +121,27 @@ func TestUSBATStatusParsesAModuleAnswer(t *testing.T) {
 	}
 }
 
+// The status page showed RSRP / RSRQ as 0 / 0 because this path never asked
+// for the serving cell. The line is in the shape the QDC507 answers, srxlev
+// "-" included; when it is there its RSSI is the measurement to show, not the
+// CSQ figure, which saturates at -51.
+func TestUSBATStatusReadsServingCellSignal(t *testing.T) {
+	responses := moduleResponses()
+	responses[`AT+QENG="servingcell"`] = "+QENG: \"servingcell\",\"NOCONN\",\"LTE\",\"FDD\",460,11,1234567,100,1650,3,5,5,1A2B,-82,-11,-70,3,-\r\n\r\nOK"
+	instance := &App{usbAT: &fakeATTransport{responses: responses}}
+
+	status, err := instance.usbATStatus()
+	if err != nil {
+		t.Fatalf("usbATStatus() error = %v", err)
+	}
+	if status.SignalRSRP != -82 || status.SignalRSRQ != -11 {
+		t.Errorf("RSRP / RSRQ = %d / %d, want -82 / -11", status.SignalRSRP, status.SignalRSRQ)
+	}
+	if status.SignalDBM != -70 {
+		t.Errorf("SignalDBM = %d, want -70 from the serving cell rather than -65 from CSQ", status.SignalDBM)
+	}
+}
+
 // Only AT+CPIN? aborts the status read; the other commands are best-effort. A
 // module that answers nothing else should still report what it can.
 func TestUSBATStatusFailsOnlyWhenCPINFails(t *testing.T) {

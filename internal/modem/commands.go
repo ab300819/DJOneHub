@@ -104,7 +104,7 @@ func (m *Manager) QueryServingCellLTEInfo() (ServingCellLTEInfo, error) {
 	if err != nil {
 		return ServingCellLTEInfo{}, err
 	}
-	info, ok := parseServingCellLTEInfo(resp)
+	info, ok := ParseServingCellLTEInfo(resp)
 	if !ok {
 		return ServingCellLTEInfo{}, nil
 	}

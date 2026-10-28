@@ -213,6 +213,7 @@ func parseCSQ(resp string) (int, int, bool) {
 type ServingCellLTEInfo struct {
 	RSRP    int
 	RSRQ    int
+	RSSI    int
 	SINR    int
 	Duplex  string
 	Band    string
@@ -220,11 +221,11 @@ type ServingCellLTEInfo struct {
 }
 
 func parseServingCellLTE(resp string) (int, int, bool) {
-	info, ok := parseServingCellLTEInfo(resp)
+	info, ok := ParseServingCellLTEInfo(resp)
 	return info.RSRP, info.RSRQ, ok
 }
 
-func parseServingCellLTEInfo(resp string) (ServingCellLTEInfo, bool) {
+func ParseServingCellLTEInfo(resp string) (ServingCellLTEInfo, bool) {
 	line, ok := findLineWithPrefix(resp, "+QENG:")
 	if !ok {
 		return ServingCellLTEInfo{}, false
@@ -249,7 +250,9 @@ func parseServingCellLTEInfo(resp string) (ServingCellLTEInfo, bool) {
 		info.Band = "LTE BAND " + strings.Trim(band, "\"")
 	}
 
-	tail := parts[len(parts)-5:]
+	// The last five fields are RSRP, RSRQ, RSSI, SINR and srxlev. srxlev is
+	// unused and the QDC507 sends "-" for it, so only the first four must parse.
+	tail := parts[len(parts)-5 : len(parts)-1]
 	parsed := make([]int, 0, len(tail))
 	for _, part := range tail {
 		part = strings.TrimSpace(part)
@@ -259,12 +262,13 @@ func parseServingCellLTEInfo(resp string) (ServingCellLTEInfo, bool) {
 		}
 		parsed = append(parsed, val)
 	}
-	if len(parsed) != 5 {
+	if len(parsed) != 4 {
 		return ServingCellLTEInfo{}, false
 	}
 
 	info.RSRP = parsed[0]
 	info.RSRQ = parsed[1]
+	info.RSSI = parsed[2]
 	info.SINR = parsed[3]
 	if info.RSRP < -140 || info.RSRP > -40 {
 		return ServingCellLTEInfo{}, false
