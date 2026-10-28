@@ -133,3 +133,19 @@ func TestDemoESIMHealthReportsTheEnabledProfile(t *testing.T) {
 		t.Errorf("demo health should read as healthy: %v", result)
 	}
 }
+
+// Sending in demo mode has to land in the conversation the same way a real
+// send does, not as a received message from a made-up sender.
+func TestDemoSendAppearsAsOutgoing(t *testing.T) {
+	app := NewDemo(UnsupportedHost{})
+	decodeResponse(t, Call(app, []byte(`{"id":1,"method":"sms.send","params":{"phone":"10086","message":"CXLL"}}`)))
+	for _, message := range app.ListSMS() {
+		if message.Content == "CXLL" {
+			if !message.Outgoing || message.Sender != "10086" {
+				t.Errorf("got %+v，想要发往 10086 的发出短信", message)
+			}
+			return
+		}
+	}
+	t.Fatal("发出的短信没有出现在列表里")
+}

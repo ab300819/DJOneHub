@@ -325,7 +325,7 @@ async function loadSMS() {
       const row = document.createElement("article");
       row.className = "item";
       const sender = document.createElement("strong");
-      sender.textContent = message.sender || "未知号码";
+      sender.textContent = message.outgoing ? `发给 ${message.sender}` : message.sender || "未知号码";
       const content = document.createElement("p");
       content.textContent = message.content;
       const time = document.createElement("time");

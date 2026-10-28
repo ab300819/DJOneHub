@@ -27,6 +27,16 @@ func (a *App) RecordSMS(sender, content string, timestamp time.Time) {
 	}
 }
 
+// recordSentSMS keeps a message after the module accepted it. The send has
+// already happened, so failing to record it is logged rather than reported.
+func (a *App) recordSentSMS(phone, content string, timestamp time.Time) {
+	if _, _, err := a.mergeSMS([]receivedSMS{{
+		Sender: phone, Content: content, Timestamp: timestamp, Outgoing: true,
+	}}); err != nil {
+		log.Printf("record sent SMS: %v", err)
+	}
+}
+
 func (a *App) mergeSMS(messages []receivedSMS) (newCount int, total int, err error) {
 	a.smsMu.Lock()
 	defer a.smsMu.Unlock()
@@ -45,7 +55,7 @@ func (a *App) mergeSMSLocked(messages []receivedSMS, persist bool) (newCount int
 	}
 	added := make([]receivedSMS, 0, len(messages))
 	for _, item := range messages {
-		if item.Code == "" {
+		if item.Code == "" && !item.Outgoing {
 			item.Code = extractSMSCode(item.Content)
 		}
 		key := smsCacheKey(item)
@@ -72,7 +82,11 @@ func (a *App) mergeSMSLocked(messages []receivedSMS, persist bool) (newCount int
 }
 
 func smsCacheKey(item receivedSMS) string {
-	return item.Sender + "\x00" + item.Content + "\x00" + item.Timestamp.Format(time.RFC3339Nano)
+	key := item.Sender + "\x00" + item.Content + "\x00" + item.Timestamp.Format(time.RFC3339Nano)
+	if item.Outgoing {
+		return ">" + key
+	}
+	return key
 }
 
 func (a *App) setSMSPollStatus(err error) {

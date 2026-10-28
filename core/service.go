@@ -178,14 +178,14 @@ func (a *App) SendSMS(phone, message string) (service.SendResult, error) {
 	if strings.TrimSpace(phone) == "" || strings.TrimSpace(message) == "" {
 		return service.SendResult{}, service.Fail(service.KindInvalid, "phone and message are required")
 	}
-	if a.demo {
-		a.RecordSMS("已发送至 "+phone, message, time.Now())
-		return service.SendResult{Sent: true, Segments: 1}, nil
+	segments := 1
+	if !a.demo {
+		var err error
+		if segments, err = a.sendTextSMS(phone, message); err != nil {
+			return service.SendResult{}, err
+		}
 	}
-	segments, err := a.sendTextSMS(phone, message)
-	if err != nil {
-		return service.SendResult{}, err
-	}
+	a.recordSentSMS(phone, message, time.Now())
 	return service.SendResult{Sent: true, Segments: segments}, nil
 }
 

@@ -140,3 +140,38 @@ func TestDemoModeLeavesNoHistoryBehind(t *testing.T) {
 		t.Fatalf("演示模式写出了历史文件（err=%v）", err)
 	}
 }
+
+// A conversation that keeps only the other side is half a conversation, and a
+// sent message exists nowhere else once the module has delivered it.
+func TestASentMessageIsKeptAsOutgoing(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "sms.jsonl")
+
+	historyApp(t, path).recordSentSMS("10086", "Your code is 482913.", at(1))
+	messages := historyApp(t, path).ListSMS()
+
+	if len(messages) != 1 {
+		t.Fatalf("重启后读回 %d 条，想要 1 条", len(messages))
+	}
+	sent := messages[0]
+	if !sent.Outgoing || sent.Sender != "10086" {
+		t.Errorf("got %+v，想要发往 10086 的发出短信", sent)
+	}
+	// Digits in what we typed are not a code someone sent us.
+	if sent.Code != "" {
+		t.Errorf("发出的短信不该提取验证码，got %q", sent.Code)
+	}
+}
+
+// Lines written before direction existed carry no field, and must still read
+// as received.
+func TestHistoryWithoutDirectionReadsAsReceived(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "sms.jsonl")
+	line := `{"sender":"10086","content":"余额不足","timestamp":"2026-08-26T10:01:00Z"}` + "\n"
+	if err := os.WriteFile(path, []byte(line), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	messages := historyApp(t, path).ListSMS()
+	if len(messages) != 1 || messages[0].Outgoing {
+		t.Fatalf("got %+v，旧记录应读作收到的短信", messages)
+	}
+}

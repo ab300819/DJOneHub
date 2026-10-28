@@ -341,6 +341,10 @@ type ReceivedSMS struct {
 	Content   string    `json:"content"`
 	Code      string    `json:"code,omitempty"`
 	Timestamp time.Time `json:"timestamp"`
+	// Outgoing marks a message this side sent; Sender then holds the
+	// recipient. Absent on everything received, including history written
+	// before sent messages were kept.
+	Outgoing bool `json:"outgoing,omitempty"`
 }
 
 // SMSStatus describes the background polling that feeds ListSMS.
