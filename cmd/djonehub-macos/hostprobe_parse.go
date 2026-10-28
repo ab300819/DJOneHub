@@ -159,6 +159,11 @@ func parseNettopActivity(out string) []service.ActivityRecord {
 		if host == "" || iface == "" || host == "127.0.0.1" || host == "::1" {
 			continue
 		}
+		// A wildcard peer is an unconnected socket, whose bytes are the
+		// process's lifetime total on any interface, not traffic of a connection.
+		if strings.HasPrefix(host, "*") {
+			continue
+		}
 		rx, _ := strconv.ParseUint(strings.TrimSpace(row[4]), 10, 64)
 		tx, _ := strconv.ParseUint(strings.TrimSpace(row[5]), 10, 64)
 		state := ""

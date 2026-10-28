@@ -32,6 +32,24 @@ func TestParseNettopActivityTracksProcessAndInterface(t *testing.T) {
 	}
 }
 
+// A socket with no peer is not a connection: nettop pins it to whatever
+// interface it likes and reports everything the process has sent since it
+// started. tincd showed 156 MiB "via the module" against 17 MiB on the module.
+func TestParseNettopActivitySkipsSocketsWithoutAPeer(t *testing.T) {
+	input := `time,,interface,state,bytes_in,bytes_out,
+00:26:25,tincd.859,,,0,163710272,
+00:26:25,udp4 *:655<->*:*,utun12,Wired,0,163710272,
+00:26:25,syncthing.67691,,,362175690,10650401,
+00:26:25,udp6 *.22000<->*.*,utun12,Wired,871521,8564610,
+00:26:25,Mail.812,,,1122304,5888,
+00:26:25,tcp4 198.51.100.10:50000<->203.0.113.5:993,utun12,Established,1122304,5888,
+`
+	records := parseNettopActivity(input)
+	if len(records) != 1 || records[0].Process != "Mail" || records[0].IP != "203.0.113.5" {
+		t.Fatalf("records = %+v, want only the Mail connection", records)
+	}
+}
+
 func TestParseNettopFlowSupportsIPv6(t *testing.T) {
 	protocol, host, port := parseNettopFlow("tcp6 2408:1::2.53147<->2606:b740:49::113.80")
 	if protocol != "tcp6" || host != "2606:b740:49::113" || port != "80" {
